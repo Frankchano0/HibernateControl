@@ -1,0 +1,9 @@
+# Build artifacts
+.DS_Store
+*.o
+*.d
+DerivedData/
+
+# Don't track the binary inside .app (it gets rebuilt)
+# But DO track the .app structure (Info.plist, icon, etc.)
+HibernateControl.app/Contents/MacOS/HibernateControl
