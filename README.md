@@ -45,13 +45,13 @@ open HibernateControl.app
 
 ### "已损坏，无法打开"
 
-打开终端，执行：
+打开终端，**复制粘贴以下一整行命令**：
 
 ```bash
-xattr -cr /Applications/HibernateControl.app
+sudo xattr -cr /Applications/HibernateControl.app
 ```
 
-然后重新打开即可。
+输入 Mac 登录密码后回车，然后重新打开即可。
 
 ### 点击 Apply 没反应
 
