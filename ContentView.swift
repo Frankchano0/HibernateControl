@@ -190,30 +190,49 @@ struct ContentView: View {
 
     private var pmsetInfoCard: some View {
         VStack(spacing: 0) {
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showPmsetInfo.toggle()
+            HStack(spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showPmsetInfo.toggle()
+                    }
+                    if showPmsetInfo { viewModel.refreshPmsetInfo() }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "terminal.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text("System State")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
+                    }
                 }
-                if showPmsetInfo { viewModel.refreshPmsetInfo() }
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "terminal.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Text("System State")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
+                .buttonStyle(.plain)
+
+                // 刷新按钮 — 重新读取 pmset 当前状态
+                if showPmsetInfo {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewModel.refreshPmsetInfo()
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .padding(4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
                 }
-                .padding(.horizontal, AppTheme.cardPadding)
-                .padding(.vertical, 8)
-                .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, AppTheme.cardPadding)
+            .padding(.vertical, 8)
+            .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
 
             if showPmsetInfo {
                 Text(viewModel.currentPmsetInfo.isEmpty ? "Loading..." : viewModel.currentPmsetInfo)

@@ -60,14 +60,16 @@ struct ShellHelper {
         }
     }
 
-    /// 启动 caffeinate 后台进程，阻止系统因空闲而进入睡眠。
-    /// caffeinate 是 macOS 自带工具，-i 标志表示阻止 idle sleep。
+    /// 启动 caffeinate 后台进程，全面阻止系统进入任何形式的睡眠。
+    /// caffeinate 是 macOS 自带工具，使用多个标志实现全面防护：
+    ///   -d 防止显示器睡眠, -i 防止空闲睡眠,
+    ///   -m 防止磁盘睡眠, -s 防止系统睡眠, -u 模拟用户活跃
     /// 返回 Process 对象，调用方可以通过 terminate() 来终止。
     /// - Returns: 正在运行的 caffeinate Process 实例
     static func launchCaffeinate() throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-i"]  // -i = prevent idle sleep
+        process.arguments = ["-dimsu"]  // 全面防止睡眠
         try process.run()
         return process
     }

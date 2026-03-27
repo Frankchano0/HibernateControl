@@ -90,7 +90,7 @@ final class HibernateViewModel: ObservableObject {
     /// 执行 `pmset -g` 命令，提取 sleep/displaysleep/disksleep 相关行，
     /// 更新 currentPmsetInfo 供 UI 显示。
     func refreshPmsetInfo() {
-        let output = ShellHelper.run("pmset -g | grep -E '(hibernatefile|networkoversleep|disksleep|sleep|displaysleep)'")
+        let output = ShellHelper.run("pmset -g | grep -E '(hibernatefile|networkoversleep|disksleep|sleep|displaysleep|disablesleep|standby|hibernatemode|tcpkeepalive)'")
         // 为每行 pmset 参数追加中文注释，方便用户理解
         let annotated = output
             .components(separatedBy: "\n")
@@ -99,11 +99,19 @@ final class HibernateViewModel: ObservableObject {
                 if trimmed.hasPrefix("hibernatefile") {
                     return line + "  ← 休眠镜像文件路径"
                 } else if trimmed.hasPrefix("networkoversleep") {
-                    return line + "  ← 睡眠时是否保持网络连接（0=否）"
+                    return line + "  ← 睡眠时保持网络（1=是）"
+                } else if trimmed.hasPrefix("disablesleep") {
+                    return line + "  ← 全局禁用睡眠（1=禁用，合盖不休眠）"
                 } else if trimmed.hasPrefix("disksleep") {
                     return line + "  ← 磁盘空闲多久后休眠（0=永不）"
                 } else if trimmed.hasPrefix("displaysleep") {
                     return line + "  ← 显示器空闲多久后关闭（0=永不）"
+                } else if trimmed.hasPrefix("standby") {
+                    return line + "  ← 深度待机（0=禁用，防长时间断电）"
+                } else if trimmed.hasPrefix("hibernatemode") {
+                    return line + "  ← 休眠模式（0=纯内存/3=混合）"
+                } else if trimmed.hasPrefix("tcpkeepalive") {
+                    return line + "  ← TCP连接保活（1=开启）"
                 } else if trimmed.hasPrefix("sleep") {
                     return line + "  ← 系统空闲多久后睡眠（0=永不）"
                 } else {
@@ -159,10 +167,14 @@ final class HibernateViewModel: ObservableObject {
 
     // MARK: - Apply Lid Mode（应用合盖行为设置）
 
-    /// 控制合盖后的系统行为。
-    /// - sleepOnLidClose: 终止 caffeinate 进程，恢复 macOS 默认合盖睡眠行为
-    /// - noSleepOnLidClose: 启动 `caffeinate -i` 进程，阻止系统因空闲而睡眠
-    ///   （-i 标志 = prevent idle sleep）
+    /// 控制合盖后的系统行为，一次性设置所有防休眠参数。
+    /// - sleepOnLidClose: 恢复 macOS 默认行为，还原所有参数
+    /// - noSleepOnLidClose: 彻底堵死所有休眠路径：
+    ///   1. disablesleep 1  — 全局禁用睡眠（包括合盖）
+    ///   2. standby 0       — 禁止深度待机（防止长时间后断电 RAM）
+    ///   3. hibernatemode 0 — 纯内存模式（不写磁盘休眠镜像）
+    ///   4. networkoversleep 1 — 万一浅睡眠也保持网络连接
+    ///   5. caffeinate -dimsu — 多重防护进程作为兜底
     func applyLidMode() async {
         lidStatus = .applying
         do {
@@ -171,15 +183,33 @@ final class HibernateViewModel: ObservableObject {
 
             switch lidMode {
             case .sleepOnLidClose:
-                // 默认行为 — 确保杀掉所有 caffeinate 进程
-                _ = ShellHelper.run("pkill -f 'caffeinate -i' 2>/dev/null")
+                // 恢复默认行为：还原所有参数，杀掉 caffeinate
+                let restoreCmd = [
+                    "pmset -a disablesleep 0",   // 重新允许系统睡眠
+                    "pmset -a standby 1",        // 恢复深度待机
+                    "pmset -a hibernatemode 3",   // 恢复混合休眠（macOS 默认）
+                    "pmset -a networkoversleep 0", // 恢复默认网络行为
+                ].joined(separator: "; ")
+                try await ShellHelper.runWithAdmin(restoreCmd)
+                _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
             case .noSleepOnLidClose:
-                // 启动新的 caffeinate 进程保持系统唤醒
+                // 一次性设置所有防休眠参数，只弹一次密码框
+                let fullCmd = [
+                    "pmset -a disablesleep 1",    // 全局禁用睡眠（含合盖）
+                    "pmset -a standby 0",         // 禁止深度待机
+                    "pmset -a hibernatemode 0",   // 纯内存模式，不写磁盘
+                    "pmset -a networkoversleep 1", // 睡眠时保持网络
+                ].joined(separator: "; ")
+                try await ShellHelper.runWithAdmin(fullCmd)
+                // caffeinate -dimsu 作为多重保障兜底：
+                //   -d 防显示器睡眠, -i 防空闲睡眠,
+                //   -m 防磁盘睡眠, -s 防系统睡眠, -u 模拟用户活跃
                 caffeinateProcess = try ShellHelper.launchCaffeinate()
             }
             lidStatus = .applied
+            refreshPmsetInfo()
         } catch {
-            lidStatus = .error("Failed to start caffeinate: \(error.localizedDescription)")
+            lidStatus = .error("Failed: \(error.localizedDescription)")
         }
     }
 
@@ -221,6 +251,6 @@ final class HibernateViewModel: ObservableObject {
     private func stopCaffeinate() {
         caffeinateProcess?.terminate()
         caffeinateProcess = nil
-        _ = ShellHelper.run("pkill -f 'caffeinate -i' 2>/dev/null")
+        _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
     }
 }
