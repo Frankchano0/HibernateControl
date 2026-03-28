@@ -148,9 +148,9 @@ final class HibernateViewModel: ObservableObject {
                 if trimmed.hasPrefix("hibernatefile") {
                     return line + "  ← 休眠镜像文件路径"
                 } else if trimmed.hasPrefix("networkoversleep") {
-                    return line + "  ← 睡眠时保持网络（1=是）"
+                    return line + "  ← 休眠时保持网络（1=是）"
                 } else if trimmed.hasPrefix("disablesleep") {
-                    return line + "  ← 全局禁用睡眠（1=禁用，合盖不休眠）"
+                    return line + "  ← 全局禁用休眠（1=禁用，合盖不休眠）"
                 } else if trimmed.hasPrefix("disksleep") {
                     return line + "  ← 磁盘空闲多久后休眠（0=永不）"
                 } else if trimmed.hasPrefix("displaysleep") {
@@ -162,7 +162,7 @@ final class HibernateViewModel: ObservableObject {
                 } else if trimmed.hasPrefix("tcpkeepalive") {
                     return line + "  ← TCP连接保活（1=开启）"
                 } else if trimmed.hasPrefix("sleep") {
-                    return line + "  ← 系统空闲多久后睡眠（0=永不）"
+                    return line + "  ← 系统空闲多久后休眠（0=永不）"
                 } else {
                     return line
                 }

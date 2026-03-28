@@ -104,7 +104,7 @@ struct ContentView: View {
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.sleepMode, options: [
-                    (SleepMode.neverSleep, "永不睡眠", "infinity"),
+                    (SleepMode.neverSleep, "永不休眠", "infinity"),
                     (SleepMode.custom, "自定义", "slider.horizontal.3"),
                 ])
 
@@ -140,19 +140,19 @@ struct ContentView: View {
         SettingCard(
             icon: "internaldrive.fill",
             iconColor: AppTheme.disk.icon,
-            title: "磁盘睡眠",
+            title: "磁盘休眠",
             status: viewModel.diskSleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.diskSleepMode, options: [
-                    (DiskSleepMode.neverSleep, "永不睡眠", "infinity"),
+                    (DiskSleepMode.neverSleep, "永不休眠", "infinity"),
                     (DiskSleepMode.custom, "自定义", "slider.horizontal.3"),
                 ])
 
                 if viewModel.diskSleepMode == .custom {
                     minuteRow(
                         icon: "clock",
-                        label: "超时时间",
+                        label: "空闲多久后休眠",
                         value: $viewModel.diskSleepMinutes,
                         accent: AppTheme.disk.accent
                     )
@@ -177,8 +177,8 @@ struct ContentView: View {
             status: viewModel.lidStatus
         ) {
             modePicker(selection: $viewModel.lidMode, options: [
-                (LidMode.sleepOnLidClose, "合盖睡眠", "moon.fill"),
-                (LidMode.noSleepOnLidClose, "合盖不睡眠", "eye.fill"),
+                (LidMode.sleepOnLidClose, "合盖休眠", "moon.fill"),
+                (LidMode.noSleepOnLidClose, "合盖不休眠", "eye.fill"),
             ])
         } applyAction: {
             await viewModel.applyLidMode()
@@ -213,7 +213,7 @@ struct ContentView: View {
                 }
                 Text(viewModel.powerButtonHibernate
                      ? "开启后：按下电源键，内存内容完整写入磁盘，RAM 断电，耗电为零，适合长时间不用时使用"
-                     : "关闭时：按下电源键进入普通睡眠，内存仍保持供电，唤醒更快")
+                     : "关闭时：按下电源键进入普通休眠，内存仍保持供电，唤醒更快")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
