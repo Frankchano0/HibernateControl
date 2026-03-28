@@ -216,44 +216,53 @@ final class HibernateViewModel: ObservableObject {
 
     // MARK: - Apply Lid Mode（应用合盖行为设置）
 
-    /// 控制合盖后的系统行为，一次性设置所有防休眠参数。
-    /// - sleepOnLidClose: 恢复 macOS 默认行为，还原所有参数
-    /// - noSleepOnLidClose: 彻底堵死所有休眠路径：
-    ///   1. disablesleep 1  — 全局禁用睡眠（包括合盖）
-    ///   2. standby 0       — 禁止深度待机（防止长时间后断电 RAM）
-    ///   3. hibernatemode 0 — 纯内存模式（不写磁盘休眠镜像）
-    ///   4. networkoversleep 1 — 万一浅睡眠也保持网络连接
-    ///   5. caffeinate -dimsu — 多重防护进程作为兜底
+    /// 控制合盖后的系统行为。
+    ///
+    /// 与「电源键休眠」的交互说明：
+    /// - disablesleep=1 会全局禁止所有睡眠，包括按电源键，因此：
+    ///   - 合盖不睡眠 + 电源键休眠关闭 → disablesleep=1（全封）
+    ///   - 合盖不睡眠 + 电源键休眠开启 → disablesleep=0，仅靠 caffeinate 防合盖睡眠，
+    ///     保留电源键触发 hibernatemode=25 的路径
     func applyLidMode() async {
         lidStatus = .applying
         do {
-            // 无论切换到哪个模式，都先停止已有的 caffeinate 进程
             stopCaffeinate()
 
             switch lidMode {
             case .sleepOnLidClose:
-                // 恢复默认行为：还原所有参数，杀掉 caffeinate
+                // 恢复默认行为，hibernatemode 由「电源键休眠」设置决定
                 let restoreCmd = [
-                    "pmset -a disablesleep 0",   // 重新允许系统睡眠
-                    "pmset -a standby 1",        // 恢复深度待机
-                    "pmset -a hibernatemode 3",   // 恢复混合休眠（macOS 默认）
-                    "pmset -a networkoversleep 0", // 恢复默认网络行为
+                    "pmset -a disablesleep 0",
+                    "pmset -a standby 1",
+                    "pmset -a networkoversleep 0",
                 ].joined(separator: "; ")
                 try await ShellHelper.runWithAdmin(restoreCmd)
                 _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
+
             case .noSleepOnLidClose:
-                // 一次性设置所有防休眠参数，只弹一次密码框
-                let fullCmd = [
-                    "pmset -a disablesleep 1",    // 全局禁用睡眠（含合盖）
-                    "pmset -a standby 0",         // 禁止深度待机
-                    "pmset -a hibernatemode 0",   // 纯内存模式，不写磁盘
-                    "pmset -a networkoversleep 1", // 睡眠时保持网络
-                ].joined(separator: "; ")
-                try await ShellHelper.runWithAdmin(fullCmd)
-                // caffeinate -dimsu 作为多重保障兜底：
-                //   -d 防显示器睡眠, -i 防空闲睡眠,
-                //   -m 防磁盘睡眠, -s 防系统睡眠, -u 模拟用户活跃
-                caffeinateProcess = try ShellHelper.launchCaffeinate()
+                if powerButtonHibernate {
+                    // 电源键休眠开启时：不能用 disablesleep=1（会阻止电源键休眠）
+                    // 改为只靠 caffeinate 防合盖睡眠，保留电源键通路
+                    let cmd = [
+                        "pmset -a disablesleep 0",     // 不全局禁止，保留电源键路径
+                        "pmset -a standby 0",
+                        "pmset -a hibernatemode 25",   // 电源键触发深度休眠
+                        "pmset -a networkoversleep 1",
+                    ].joined(separator: "; ")
+                    try await ShellHelper.runWithAdmin(cmd)
+                    // caffeinate -dim（去掉 -s，不阻止系统睡眠，只阻止自动睡眠）
+                    caffeinateProcess = try ShellHelper.launchCaffeinate()
+                } else {
+                    // 电源键休眠关闭：用 disablesleep=1 完全封死所有睡眠
+                    let cmd = [
+                        "pmset -a disablesleep 1",
+                        "pmset -a standby 0",
+                        "pmset -a hibernatemode 0",
+                        "pmset -a networkoversleep 1",
+                    ].joined(separator: "; ")
+                    try await ShellHelper.runWithAdmin(cmd)
+                    caffeinateProcess = try ShellHelper.launchCaffeinate()
+                }
             }
             lidStatus = .applied
             refreshPmsetInfo()
@@ -265,29 +274,26 @@ final class HibernateViewModel: ObservableObject {
     // MARK: - Apply Power Button Hibernate（应用电源键休眠设置）
 
     /// 控制按下电源键时是否进入真正的磁盘休眠。
-    /// - 开启（hibernatemode 25）：按下电源键时，内存内容写入磁盘休眠镜像，
-    ///   随后 RAM 完全断电，实现零耗电深度休眠，唤醒时从磁盘恢复。
-    ///   注意：此模式需要关闭 disablesleep，因此若当前合盖模式为"Stay Awake"则会给出提示。
-    /// - 关闭（hibernatemode 3）：恢复 macOS 默认混合休眠（内存内容同时写盘，
-    ///   但 RAM 仍保持供电，唤醒较快；仅在断电时才从磁盘恢复）。
+    /// 会根据合盖模式决定是否调整 disablesleep，避免互相覆盖。
     func applyPowerButtonHibernate() async {
         powerButtonHibernateStatus = .applying
         do {
             if powerButtonHibernate {
-                // hibernatemode 25：按电源键触发真正磁盘休眠（Safe Sleep / Standby）
-                // standby 0 防止后台自动进入更深的 standby，保持行为可预期
-                let cmd = [
-                    "pmset -a hibernatemode 25",  // 开启真正磁盘休眠
-                    "pmset -a standby 0",          // 避免 standby 干扰
-                ].joined(separator: "; ")
-                try await ShellHelper.runWithAdmin(cmd)
+                // 开启：写入 hibernatemode 25
+                // 若合盖不睡眠模式开启，同步确保 disablesleep=0（否则电源键无效）
+                var cmds = ["pmset -a hibernatemode 25", "pmset -a standby 0"]
+                if lidMode == .noSleepOnLidClose {
+                    cmds.append("pmset -a disablesleep 0")
+                }
+                try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
             } else {
-                // hibernatemode 3：恢复 macOS 默认混合休眠
-                let cmd = [
-                    "pmset -a hibernatemode 3",   // 混合模式：内存+磁盘双写
-                    "pmset -a standby 1",          // 恢复默认 standby
-                ].joined(separator: "; ")
-                try await ShellHelper.runWithAdmin(cmd)
+                // 关闭：恢复 hibernatemode 3
+                // 若合盖不睡眠模式开启，恢复 disablesleep=1
+                var cmds = ["pmset -a hibernatemode 3", "pmset -a standby 1"]
+                if lidMode == .noSleepOnLidClose {
+                    cmds.append("pmset -a disablesleep 1")
+                }
+                try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
             }
             powerButtonHibernateStatus = .applied
             refreshPmsetInfo()

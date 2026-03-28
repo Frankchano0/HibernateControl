@@ -217,22 +217,6 @@ struct ContentView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-
-                // 与"Stay Awake"冲突提示
-                if viewModel.powerButtonHibernate && viewModel.lidMode == .noSleepOnLidClose {
-                    HStack(spacing: 5) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                        Text("与「合盖不睡眠」冲突，可能不生效")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.orange)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
             }
         } applyAction: {
             await viewModel.applyPowerButtonHibernate()
