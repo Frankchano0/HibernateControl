@@ -99,7 +99,7 @@ struct ContentView: View {
         SettingCard(
             icon: "moon.zzz.fill",
             iconColor: AppTheme.sleep.icon,
-            title: "睡眠模式",
+            title: "自动休眠",
             status: viewModel.sleepStatus
         ) {
             VStack(spacing: 10) {
