@@ -24,6 +24,8 @@
     <true/>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>LSUIElement</key>
+    <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

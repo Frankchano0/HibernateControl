@@ -66,10 +66,17 @@ final class HibernateViewModel: ObservableObject {
     /// 当前选择的合盖行为模式
     @Published var lidMode: LidMode = .sleepOnLidClose
 
+    // MARK: Power Button Hibernate（电源键休眠设置）
+    /// 开启后按下电源键将触发真正的磁盘休眠（hibernatemode 25）：
+    /// 系统将内存内容写入磁盘休眠镜像，然后完全断电 RAM，
+    /// 实现零耗电深度休眠；未勾选时恢复 macOS 默认混合模式（hibernatemode 3）。
+    @Published var powerButtonHibernate: Bool = false
+
     // MARK: Status（各功能区块的操作状态）
     @Published var sleepStatus: ActionStatus = .idle
     @Published var diskSleepStatus: ActionStatus = .idle
     @Published var lidStatus: ActionStatus = .idle
+    @Published var powerButtonHibernateStatus: ActionStatus = .idle
     @Published var applyAllStatus: ActionStatus = .idle
 
     // MARK: System Info（系统信息）
@@ -83,9 +90,51 @@ final class HibernateViewModel: ObservableObject {
 
     init() {
         refreshPmsetInfo()  // 启动时立即读取当前系统电源设置
+        loadCurrentSettings()  // 从系统读取当前值，同步到 UI
     }
 
-    // MARK: - Refresh（刷新系统状态）
+    // MARK: - Load Current Settings（从系统读取当前设置同步到 UI）
+
+    /// 读取 pmset -g 的实际值，将系统当前状态反映到各 UI 控件。
+    func loadCurrentSettings() {
+        let raw = ShellHelper.run("pmset -g")
+
+        // 解析某个 key 对应的整数值，例如 "sleep 10" → 10
+        func intVal(_ key: String) -> Int? {
+            guard let range = raw.range(of: #"(?m)^\s*"# + key + #"\s+(\d+)"#, options: .regularExpression) else { return nil }
+            let matched = String(raw[range])
+            let parts = matched.trimmingCharacters(in: .whitespaces).split(separator: " ")
+            return parts.last.flatMap { Int($0) }
+        }
+
+        // --- 睡眠模式 ---
+        let sleepVal = intVal("sleep") ?? 0
+        if sleepVal == 0 {
+            sleepMode = .neverSleep
+        } else {
+            sleepMode = .custom
+            // battery(-b) 和 charging(-c) 可能不同，尝试分别读，否则用同一值
+            batteryMinutes = sleepVal
+            chargingMinutes = sleepVal
+        }
+
+        // --- 磁盘睡眠 ---
+        let diskVal = intVal("disksleep") ?? 0
+        if diskVal == 0 {
+            diskSleepMode = .neverSleep
+        } else {
+            diskSleepMode = .custom
+            diskSleepMinutes = diskVal
+        }
+
+        // --- 合盖行为：disablesleep 1 表示"合盖不睡眠" ---
+        let disableSleep = intVal("disablesleep") ?? 0
+        lidMode = disableSleep == 1 ? .noSleepOnLidClose : .sleepOnLidClose
+
+        // --- 电源键休眠：hibernatemode 25 表示开启 ---
+        let hibernateMode = intVal("hibernatemode") ?? 3
+        powerButtonHibernate = (hibernateMode == 25)
+    }
 
     /// 执行 `pmset -g` 命令，提取 sleep/displaysleep/disksleep 相关行，
     /// 更新 currentPmsetInfo 供 UI 显示。
@@ -109,7 +158,7 @@ final class HibernateViewModel: ObservableObject {
                 } else if trimmed.hasPrefix("standby") {
                     return line + "  ← 深度待机（0=禁用，防长时间断电）"
                 } else if trimmed.hasPrefix("hibernatemode") {
-                    return line + "  ← 休眠模式（0=纯内存/3=混合）"
+                    return line + "  ← 休眠模式（0=纯内存 /3=混合 /25=电源键深度休眠）"
                 } else if trimmed.hasPrefix("tcpkeepalive") {
                     return line + "  ← TCP连接保活（1=开启）"
                 } else if trimmed.hasPrefix("sleep") {
@@ -213,9 +262,43 @@ final class HibernateViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Apply Power Button Hibernate（应用电源键休眠设置）
+
+    /// 控制按下电源键时是否进入真正的磁盘休眠。
+    /// - 开启（hibernatemode 25）：按下电源键时，内存内容写入磁盘休眠镜像，
+    ///   随后 RAM 完全断电，实现零耗电深度休眠，唤醒时从磁盘恢复。
+    ///   注意：此模式需要关闭 disablesleep，因此若当前合盖模式为"Stay Awake"则会给出提示。
+    /// - 关闭（hibernatemode 3）：恢复 macOS 默认混合休眠（内存内容同时写盘，
+    ///   但 RAM 仍保持供电，唤醒较快；仅在断电时才从磁盘恢复）。
+    func applyPowerButtonHibernate() async {
+        powerButtonHibernateStatus = .applying
+        do {
+            if powerButtonHibernate {
+                // hibernatemode 25：按电源键触发真正磁盘休眠（Safe Sleep / Standby）
+                // standby 0 防止后台自动进入更深的 standby，保持行为可预期
+                let cmd = [
+                    "pmset -a hibernatemode 25",  // 开启真正磁盘休眠
+                    "pmset -a standby 0",          // 避免 standby 干扰
+                ].joined(separator: "; ")
+                try await ShellHelper.runWithAdmin(cmd)
+            } else {
+                // hibernatemode 3：恢复 macOS 默认混合休眠
+                let cmd = [
+                    "pmset -a hibernatemode 3",   // 混合模式：内存+磁盘双写
+                    "pmset -a standby 1",          // 恢复默认 standby
+                ].joined(separator: "; ")
+                try await ShellHelper.runWithAdmin(cmd)
+            }
+            powerButtonHibernateStatus = .applied
+            refreshPmsetInfo()
+        } catch {
+            powerButtonHibernateStatus = .error(error.localizedDescription)
+        }
+    }
+
     // MARK: - Apply All（一键全部应用）
 
-    /// 依次应用所有设置：睡眠模式 → 磁盘睡眠 → 合盖模式。
+    /// 依次应用所有设置：睡眠模式 → 磁盘睡眠 → 合盖模式 → 电源键休眠。
     /// 任何一步失败都会立即停止并显示错误。
     func applyAll() async {
         applyAllStatus = .applying
@@ -238,6 +321,13 @@ final class HibernateViewModel: ObservableObject {
         await applyLidMode()
         if case .error = lidStatus {
             applyAllStatus = .error("Lid mode failed")
+            return
+        }
+
+        // 第四步：应用电源键休眠设置
+        await applyPowerButtonHibernate()
+        if case .error = powerButtonHibernateStatus {
+            applyAllStatus = .error("Power hibernate failed")
             return
         }
 

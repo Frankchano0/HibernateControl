@@ -26,6 +26,8 @@ enum AppTheme {
     static let disk = SectionColor(icon: .orange, accent: .orange)
     /// 合盖模式区块 — 青色
     static let lid = SectionColor(icon: .teal, accent: .teal)
+    /// 电源键休眠区块 — 紫色
+    static let powerHibernate = SectionColor(icon: .purple, accent: .purple)
 }
 
 // MARK: - Content View（主界面）
@@ -42,14 +44,13 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            headerView          // 顶部标题栏
-
             ScrollView {
                 VStack(spacing: AppTheme.sectionSpacing) {
-                    sleepModeCard   // 睡眠模式设置卡片
-                    diskSleepCard   // 磁盘睡眠设置卡片
-                    lidModeCard     // 合盖行为设置卡片
-                    pmsetInfoCard   // 系统电源状态信息（可折叠）
+                    sleepModeCard
+                    diskSleepCard
+                    lidModeCard
+                    powerButtonHibernateCard
+                    pmsetInfoCard
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -58,7 +59,7 @@ struct ContentView: View {
 
             applyAllBar         // 底部"全部应用"操作栏
         }
-        .frame(width: 400, height: 540)   // 固定窗口尺寸
+        .frame(width: 400)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -98,26 +99,26 @@ struct ContentView: View {
         SettingCard(
             icon: "moon.zzz.fill",
             iconColor: AppTheme.sleep.icon,
-            title: "Sleep Mode",
+            title: "睡眠模式",
             status: viewModel.sleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.sleepMode, options: [
-                    (SleepMode.neverSleep, "Never Sleep", "infinity"),
-                    (SleepMode.custom, "Custom", "slider.horizontal.3"),
+                    (SleepMode.neverSleep, "永不睡眠", "infinity"),
+                    (SleepMode.custom, "自定义", "slider.horizontal.3"),
                 ])
 
                 if viewModel.sleepMode == .custom {
                     VStack(spacing: 6) {
                         minuteRow(
                             icon: "battery.25",
-                            label: "Battery",
+                            label: "电池",
                             value: $viewModel.batteryMinutes,
                             accent: AppTheme.sleep.accent
                         )
                         minuteRow(
                             icon: "bolt.fill",
-                            label: "Charging",
+                            label: "充电中",
                             value: $viewModel.chargingMinutes,
                             accent: AppTheme.sleep.accent
                         )
@@ -139,19 +140,19 @@ struct ContentView: View {
         SettingCard(
             icon: "internaldrive.fill",
             iconColor: AppTheme.disk.icon,
-            title: "Disk Sleep Mode",
+            title: "磁盘睡眠",
             status: viewModel.diskSleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.diskSleepMode, options: [
-                    (DiskSleepMode.neverSleep, "Never Sleep", "infinity"),
-                    (DiskSleepMode.custom, "Custom", "slider.horizontal.3"),
+                    (DiskSleepMode.neverSleep, "永不睡眠", "infinity"),
+                    (DiskSleepMode.custom, "自定义", "slider.horizontal.3"),
                 ])
 
                 if viewModel.diskSleepMode == .custom {
                     minuteRow(
                         icon: "clock",
-                        label: "Timeout",
+                        label: "超时时间",
                         value: $viewModel.diskSleepMinutes,
                         accent: AppTheme.disk.accent
                     )
@@ -172,15 +173,69 @@ struct ContentView: View {
         SettingCard(
             icon: "laptopcomputer.closed",
             iconColor: AppTheme.lid.icon,
-            title: "Lid Mode",
+            title: "合盖行为",
             status: viewModel.lidStatus
         ) {
             modePicker(selection: $viewModel.lidMode, options: [
-                (LidMode.sleepOnLidClose, "Sleep on Close", "moon.fill"),
-                (LidMode.noSleepOnLidClose, "Stay Awake", "eye.fill"),
+                (LidMode.sleepOnLidClose, "合盖睡眠", "moon.fill"),
+                (LidMode.noSleepOnLidClose, "合盖不睡眠", "eye.fill"),
             ])
         } applyAction: {
             await viewModel.applyLidMode()
+        }
+    }
+
+    // MARK: - Power Button Hibernate Card（电源键休眠设置卡片）
+    // 控制按下电源键时是否进入真正的磁盘深度休眠（hibernatemode 25）。
+    // - 关闭（默认）：macOS 混合模式（hibernatemode 3），内存+磁盘双写，唤醒较快
+    // - 开启：按下电源键时将内存完整写入磁盘，RAM 彻底断电，零耗电深度休眠
+    //   注意：开启时若合盖模式为"Stay Awake"，两者互相冲突，会显示提示。
+
+    private var powerButtonHibernateCard: some View {
+        SettingCard(
+            icon: "sleep",
+            iconColor: AppTheme.powerHibernate.icon,
+            title: "电源键休眠",
+            status: viewModel.powerButtonHibernateStatus,
+            showApplyButton: false
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                // Toggle 开关行
+                HStack(spacing: 8) {
+                    Toggle("按电源键时休眠", isOn: $viewModel.powerButtonHibernate)
+                        .toggleStyle(.switch)
+                        .tint(AppTheme.powerHibernate.accent)
+                        .font(.system(size: 12, weight: .medium))
+                        .onChange(of: viewModel.powerButtonHibernate) {
+                            Task { await viewModel.applyPowerButtonHibernate() }
+                        }
+                    Spacer()
+                }
+                Text(viewModel.powerButtonHibernate
+                     ? "开启后：按下电源键，内存内容完整写入磁盘，RAM 断电，耗电为零，适合长时间不用时使用"
+                     : "关闭时：按下电源键进入普通睡眠，内存仍保持供电，唤醒更快")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // 与"Stay Awake"冲突提示
+                if viewModel.powerButtonHibernate && viewModel.lidMode == .noSleepOnLidClose {
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                        Text("与「合盖不睡眠」冲突，可能不生效")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        } applyAction: {
+            await viewModel.applyPowerButtonHibernate()
         }
     }
 
@@ -201,7 +256,7 @@ struct ContentView: View {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
-                        Text("System State")
+                        Text("系统状态")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -248,20 +303,17 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Apply All Bar（底部"全部应用"操作栏）
-    // 一键将所有设置（睡眠、磁盘睡眠、合盖模式）同时应用到系统。
-    // 左侧显示当前操作状态（Ready / Applying / All Applied / Error），
-    // 右侧是"全部应用"按钮。
+    // MARK: - Apply All Bar（底部操作栏）
+    // 左侧状态 + 右侧「全部应用」+「退出」按钮
 
     private var applyAllBar: some View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 12) {
-                // Status
                 applyAllStatusView
                 Spacer()
 
-                // Button
+                // 全部应用
                 Button(action: {
                     Task { await viewModel.applyAll() }
                 }) {
@@ -283,6 +335,17 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
                 .disabled(viewModel.applyAllStatus.isApplying)
+
+                // 退出
+                Button(action: {
+                    NSApplication.shared.terminate(nil)
+                }) {
+                    Text("退出")
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                }
+                .buttonStyle(.bordered)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -299,7 +362,7 @@ struct ContentView: View {
             HStack(spacing: 4) {
                 Circle().fill(.blue).frame(width: 6, height: 6)
                     .opacity(0.8)
-                Text("Applying...")
+                Text("应用中...")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -308,7 +371,7 @@ struct ContentView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
-                Text("All Applied")
+                Text("已全部应用")
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
             }
@@ -327,18 +390,23 @@ struct ContentView: View {
 
     // MARK: - Reusable Components（可复用 UI 组件）
 
-    /// 模式选择器 — 水平排列的分段按钮组，用于在两个选项之间切换
+    /// 模式选择器 — 水平排列的分段按钮组，选中后立即执行 onSelect 回调
     /// - selection: 绑定的状态变量
     /// - options: 元组数组 (枚举值, 显示文本, SF Symbol 图标名)
+    /// - onSelect: 选中某项后立即触发的异步操作（即点即应用）
     private func modePicker<T: Hashable>(
         selection: Binding<T>,
-        options: [(T, String, String)]
+        options: [(T, String, String)],
+        onSelect: @escaping () async -> Void = {}
     ) -> some View {
         HStack(spacing: 6) {
             ForEach(0..<options.count, id: \.self) { i in
                 let option = options[i]
                 let isSelected = selection.wrappedValue == option.0
-                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { selection.wrappedValue = option.0 } }) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) { selection.wrappedValue = option.0 }
+                    Task { await onSelect() }
+                }) {
                     HStack(spacing: 5) {
                         Image(systemName: option.2)
                             .font(.system(size: 10, weight: .medium))
@@ -353,6 +421,7 @@ struct ContentView: View {
                             : AnyShapeStyle(.clear),
                         in: RoundedRectangle(cornerRadius: 6)
                     )
+                    .contentShape(Rectangle())
                     .foregroundStyle(isSelected ? .primary : .secondary)
                 }
                 .buttonStyle(.plain)
@@ -409,20 +478,19 @@ struct ContentView: View {
 }
 
 // MARK: - Setting Card（通用设置卡片组件）
-// 可复用的卡片容器，每个功能区块都使用这个组件包装。
-// 包含：图标 + 标题 + 状态徽标 + Apply 按钮 + 自定义内容区域。
+// 包含：图标 + 标题 + 状态徽标 + 可选的「应用」按钮 + 自定义内容区域。
 
 struct SettingCard<Content: View>: View {
-    let icon: String            // SF Symbol 图标名
-    let iconColor: Color        // 图标颜色
-    let title: String           // 卡片标题
-    let status: ActionStatus    // 当前操作状态（idle/applying/applied/error）
-    @ViewBuilder let content: () -> Content   // 卡片内的自定义内容
-    let applyAction: () async -> Void         // 点击 Apply 时执行的异步操作
+    let icon: String
+    let iconColor: Color
+    let title: String
+    let status: ActionStatus
+    var showApplyButton: Bool = true          // 控制是否显示「应用」按钮
+    @ViewBuilder let content: () -> Content
+    let applyAction: () async -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header row
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 13, weight: .semibold))
@@ -430,12 +498,11 @@ struct SettingCard<Content: View>: View {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-
-                // Inline status + apply
                 statusBadge
-                applyActionButton
+                if showApplyButton {
+                    applyActionButton
+                }
             }
-
             content()
         }
         .padding(AppTheme.cardPadding)
@@ -464,7 +531,7 @@ struct SettingCard<Content: View>: View {
 
     private var applyActionButton: some View {
         Button(action: { Task { await applyAction() } }) {
-            Text("Apply")
+            Text("应用")
                 .font(.system(size: 10, weight: .medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
