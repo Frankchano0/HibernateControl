@@ -37,9 +37,8 @@ enum AppTheme {
 // 3. 底部"全部应用"操作栏 (applyAllBar)
 
 struct ContentView: View {
-    /// ViewModel — 管理所有业务逻辑和状态，通过 @StateObject 保证生命周期与视图绑定
     @StateObject private var viewModel = HibernateViewModel()
-    /// 控制"System State"展开/折叠的开关
+    @EnvironmentObject private var lang: LanguageManager
     @State private var showPmsetInfo = false
 
     var body: some View {
@@ -99,26 +98,26 @@ struct ContentView: View {
         SettingCard(
             icon: "moon.zzz.fill",
             iconColor: AppTheme.sleep.icon,
-            title: "自动休眠",
+            title: lang.t("自动休眠", "Auto Sleep"),
             status: viewModel.sleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.sleepMode, options: [
-                    (SleepMode.neverSleep, "永不休眠", "infinity"),
-                    (SleepMode.custom, "自定义", "slider.horizontal.3"),
+                    (SleepMode.neverSleep, lang.t("永不休眠", "Never"), "infinity"),
+                    (SleepMode.custom, lang.t("自定义", "Custom"), "slider.horizontal.3"),
                 ])
 
                 if viewModel.sleepMode == .custom {
                     VStack(spacing: 6) {
                         minuteRow(
                             icon: "battery.25",
-                            label: "电池",
+                            label: lang.t("电池", "Battery"),
                             value: $viewModel.batteryMinutes,
                             accent: AppTheme.sleep.accent
                         )
                         minuteRow(
                             icon: "bolt.fill",
-                            label: "充电中",
+                            label: lang.t("充电中", "Charging"),
                             value: $viewModel.chargingMinutes,
                             accent: AppTheme.sleep.accent
                         )
@@ -140,19 +139,19 @@ struct ContentView: View {
         SettingCard(
             icon: "internaldrive.fill",
             iconColor: AppTheme.disk.icon,
-            title: "磁盘休眠",
+            title: lang.t("磁盘休眠", "Disk Hibernate"),
             status: viewModel.diskSleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.diskSleepMode, options: [
-                    (DiskSleepMode.neverSleep, "永不休眠", "infinity"),
-                    (DiskSleepMode.custom, "自定义", "slider.horizontal.3"),
+                    (DiskSleepMode.neverSleep, lang.t("永不休眠", "Never"), "infinity"),
+                    (DiskSleepMode.custom, lang.t("自定义", "Custom"), "slider.horizontal.3"),
                 ])
 
                 if viewModel.diskSleepMode == .custom {
                     minuteRow(
                         icon: "clock",
-                        label: "空闲多久后休眠",
+                        label: lang.t("空闲多久后休眠", "Idle timeout"),
                         value: $viewModel.diskSleepMinutes,
                         accent: AppTheme.disk.accent
                     )
@@ -173,12 +172,12 @@ struct ContentView: View {
         SettingCard(
             icon: "laptopcomputer.closed",
             iconColor: AppTheme.lid.icon,
-            title: "合盖行为",
+            title: lang.t("合盖行为", "Lid Behavior"),
             status: viewModel.lidStatus
         ) {
             modePicker(selection: $viewModel.lidMode, options: [
-                (LidMode.sleepOnLidClose, "合盖休眠", "moon.fill"),
-                (LidMode.noSleepOnLidClose, "合盖不休眠", "eye.fill"),
+                (LidMode.sleepOnLidClose, lang.t("合盖休眠", "Sleep on Close"), "moon.fill"),
+                (LidMode.noSleepOnLidClose, lang.t("合盖不休眠", "Stay Awake"), "eye.fill"),
             ])
         } applyAction: {
             await viewModel.applyLidMode()
@@ -195,14 +194,14 @@ struct ContentView: View {
         SettingCard(
             icon: "sleep",
             iconColor: AppTheme.powerHibernate.icon,
-            title: "电源键休眠",
+            title: lang.t("电源键休眠", "Power Button Hibernate"),
             status: viewModel.powerButtonHibernateStatus,
             showApplyButton: false
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 // Toggle 开关行
                 HStack(spacing: 8) {
-                    Toggle("按电源键时休眠", isOn: $viewModel.powerButtonHibernate)
+                    Toggle(lang.t("按电源键时休眠", "Hibernate on power button"), isOn: $viewModel.powerButtonHibernate)
                         .toggleStyle(.switch)
                         .tint(AppTheme.powerHibernate.accent)
                         .font(.system(size: 12, weight: .medium))
@@ -212,8 +211,10 @@ struct ContentView: View {
                     Spacer()
                 }
                 Text(viewModel.powerButtonHibernate
-                     ? "开启后：按下电源键，内存内容完整写入磁盘，RAM 断电，耗电为零，适合长时间不用时使用"
-                     : "关闭时：按下电源键进入普通休眠，内存仍保持供电，唤醒更快")
+                     ? lang.t("开启后：按下电源键，内存内容完整写入磁盘，RAM 断电，耗电为零，适合长时间不用时使用",
+                              "On: pressing power writes RAM to disk and cuts all power. Zero draw. Best for long idle periods.")
+                     : lang.t("关闭时：按下电源键进入普通休眠，内存仍保持供电，唤醒更快",
+                              "Off: power button enters regular sleep. RAM stays powered, wakes faster."))
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -240,7 +241,7 @@ struct ContentView: View {
                         Image(systemName: "terminal.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
-                        Text("系统状态")
+                        Text(lang.t("系统状态", "System State"))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -310,7 +311,7 @@ struct ContentView: View {
                             Image(systemName: "bolt.circle.fill")
                                 .font(.system(size: 14))
                         }
-                        Text("全部应用")
+                        Text(lang.t("全部应用", "Apply All"))
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .padding(.horizontal, 16)
@@ -324,7 +325,7 @@ struct ContentView: View {
                 Button(action: {
                     NSApplication.shared.terminate(nil)
                 }) {
-                    Text("退出")
+                    Text(lang.t("退出", "Quit"))
                         .font(.system(size: 13))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
@@ -346,7 +347,7 @@ struct ContentView: View {
             HStack(spacing: 4) {
                 Circle().fill(.blue).frame(width: 6, height: 6)
                     .opacity(0.8)
-                Text("应用中...")
+                Text(lang.t("应用中...", "Applying..."))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -355,7 +356,7 @@ struct ContentView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
-                Text("已全部应用")
+                Text(lang.t("已全部应用", "All Applied"))
                     .font(.system(size: 11))
                     .foregroundStyle(.green)
             }
@@ -415,11 +416,6 @@ struct ContentView: View {
         .background(Color(nsColor: .separatorColor).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    /// 分钟数调节行 — 带有 -/+ 按钮的数值调节控件
-    /// - icon: 左侧图标（SF Symbol 名称）
-    /// - label: 标签文本（如 "Battery"、"Charging"）
-    /// - value: 绑定的分钟数值（范围 1~180）
-    /// - accent: 图标的强调色
     private func minuteRow(
         icon: String,
         label: String,
@@ -443,7 +439,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
 
-                Text("\(value.wrappedValue) min")
+                Text("\(value.wrappedValue) \(lang.t("分钟", "min"))")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .frame(width: 52)
 
@@ -469,9 +465,10 @@ struct SettingCard<Content: View>: View {
     let iconColor: Color
     let title: String
     let status: ActionStatus
-    var showApplyButton: Bool = true          // 控制是否显示「应用」按钮
+    var showApplyButton: Bool = true
     @ViewBuilder let content: () -> Content
     let applyAction: () async -> Void
+    @EnvironmentObject private var lang: LanguageManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -515,7 +512,7 @@ struct SettingCard<Content: View>: View {
 
     private var applyActionButton: some View {
         Button(action: { Task { await applyAction() } }) {
-            Text("应用")
+            Text(lang.t("应用", "Apply"))
                 .font(.system(size: 10, weight: .medium))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
