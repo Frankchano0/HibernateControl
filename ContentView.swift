@@ -40,15 +40,16 @@ struct ContentView: View {
     @StateObject private var viewModel = HibernateViewModel()
     @EnvironmentObject private var lang: LanguageManager
     @State private var showPmsetInfo = false
+    @State private var hibernateModeExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: AppTheme.sectionSpacing) {
                     sleepModeCard
                     diskSleepCard
                     lidModeCard
-                    powerButtonHibernateCard
+                    hibernateModeCard
                     pmsetInfoCard
                 }
                 .padding(.horizontal, 16)
@@ -58,7 +59,8 @@ struct ContentView: View {
 
             applyAllBar         // 底部"全部应用"操作栏
         }
-        .frame(width: 400)
+        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -185,43 +187,151 @@ struct ContentView: View {
     }
 
     // MARK: - Power Button Hibernate Card（电源键休眠设置卡片）
-    // 控制按下电源键时是否进入真正的磁盘深度休眠（hibernatemode 25）。
-    // - 关闭（默认）：macOS 混合模式（hibernatemode 3），内存+磁盘双写，唤醒较快
-    // - 开启：按下电源键时将内存完整写入磁盘，RAM 彻底断电，零耗电深度休眠
-    //   注意：开启时若合盖模式为"Stay Awake"，两者互相冲突，会显示提示。
+    // MARK: - Hibernate Mode Card（休眠模式设置卡片）
 
-    private var powerButtonHibernateCard: some View {
-        SettingCard(
-            icon: "sleep",
-            iconColor: AppTheme.powerHibernate.icon,
-            title: lang.t("电源键休眠", "Power Button Hibernate"),
-            status: viewModel.powerButtonHibernateStatus,
-            showApplyButton: false
-        ) {
-            VStack(alignment: .leading, spacing: 8) {
-                // Toggle 开关行
-                HStack(spacing: 8) {
-                    Toggle(lang.t("按电源键时休眠", "Hibernate on power button"), isOn: $viewModel.powerButtonHibernate)
-                        .toggleStyle(.switch)
-                        .tint(AppTheme.powerHibernate.accent)
-                        .font(.system(size: 12, weight: .medium))
-                        .onChange(of: viewModel.powerButtonHibernate) {
-                            Task { await viewModel.applyPowerButtonHibernate() }
-                        }
-                    Spacer()
+    private var hibernateModeCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // 标题行（可点击折叠）
+            HStack(spacing: 8) {
+                Image(systemName: "sleep")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppTheme.powerHibernate.icon)
+                Text(lang.t("休眠模式", "Hibernate Mode"))
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+
+                // 缩起时显示当前模式名
+                if !hibernateModeExpanded {
+                    Text(currentHibernateModeName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(AppTheme.powerHibernate.accent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(AppTheme.powerHibernate.accent.opacity(0.1), in: Capsule())
                 }
-                Text(viewModel.powerButtonHibernate
-                     ? lang.t("开启后：按下电源键，内存内容完整写入磁盘，RAM 断电，耗电为零，适合长时间不用时使用",
-                              "On: pressing power writes RAM to disk and cuts all power. Zero draw. Best for long idle periods.")
-                     : lang.t("关闭时：按下电源键进入普通休眠，内存仍保持供电，唤醒更快",
-                              "Off: power button enters regular sleep. RAM stays powered, wakes faster."))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+
+                // 状态徽标
+                hibernateModeStatusBadge
+
+                // 折叠箭头
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(hibernateModeExpanded ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: hibernateModeExpanded)
+
+                // 应用按钮
+                Button(action: { Task { await viewModel.applyHibernateMode() } }) {
+                    Text(lang.t("应用", "Apply"))
+                        .font(.system(size: 10, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+                .disabled(viewModel.hibernateModeStatus.isApplying)
             }
-        } applyAction: {
-            await viewModel.applyPowerButtonHibernate()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    hibernateModeExpanded.toggle()
+                }
+            }
+
+            // 展开内容
+            if hibernateModeExpanded {
+                VStack(spacing: 8) {
+                    ForEach([HibernateMode.memoryOnly, .hybrid, .deepHibernate], id: \.self) { mode in
+                        hibernateModeRow(mode: mode)
+                    }
+                }
+                .padding(.top, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .padding(AppTheme.cardPadding)
+        .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
+    }
+
+    @ViewBuilder
+    private var hibernateModeStatusBadge: some View {
+        switch viewModel.hibernateModeStatus {
+        case .idle: EmptyView()
+        case .applying:
+            ProgressView().controlSize(.mini).scaleEffect(0.7)
+        case .applied:
+            Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.green)
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(.red)
+        }
+    }
+
+    private var currentHibernateModeName: String {
+        switch viewModel.hibernateMode {
+        case .memoryOnly:    return lang.t("纯内存", "Memory Only")
+        case .hybrid:        return lang.t("混合", "Hybrid")
+        case .deepHibernate: return lang.t("深度休眠", "Deep Hibernate")
+        }
+    }
+
+    @ViewBuilder
+    private func hibernateModeRow(mode: HibernateMode) -> some View {
+        let isSelected = viewModel.hibernateMode == mode
+        let (icon, title, desc): (String, String, String) = {
+            switch mode {
+            case .memoryOnly:
+                return ("bolt.fill",
+                        lang.t("纯内存", "Memory Only"),
+                        lang.t("唤醒最快，断电会丢数据，适合短时休眠", "Fastest wake. Data lost if power cut. Best for short naps."))
+            case .hybrid:
+                return ("square.stack.fill",
+                        lang.t("混合（默认）", "Hybrid (Default)"),
+                        lang.t("内存+磁盘双写，唤醒快，断电也能恢复", "Writes RAM + disk. Fast wake, safe if power cuts."))
+            case .deepHibernate:
+                return ("moon.zzz.fill",
+                        lang.t("深度休眠", "Deep Hibernate"),
+                        lang.t("RAM 完全断电，零耗电，唤醒慢，适合长时间不用", "RAM off, zero draw. Slow wake. Best for long periods."))
+            }
+        }()
+
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                viewModel.hibernateMode = mode
+            }
+        }) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isSelected ? AppTheme.powerHibernate.accent : .secondary)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                    Text(desc)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(AppTheme.powerHibernate.accent)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                isSelected
+                    ? AnyShapeStyle(AppTheme.powerHibernate.accent.opacity(0.08))
+                    : AnyShapeStyle(Color.clear),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Pmset Info Card（系统电源状态信息卡片）

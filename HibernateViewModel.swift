@@ -5,20 +5,27 @@ import SwiftUI
 
 /// 系统睡眠模式选项
 enum SleepMode: Equatable {
-    case neverSleep  // 永不睡眠 — 将 sleep 和 displaysleep 设为 0
-    case custom      // 自定义 — 分别设置电池和充电状态下的睡眠时间
+    case neverSleep
+    case custom
 }
 
 /// 磁盘睡眠模式选项
 enum DiskSleepMode: Equatable {
-    case neverSleep  // 磁盘永不休眠 — 将 disksleep 设为 0
-    case custom      // 自定义 — 设置磁盘空闲后的休眠超时时间
+    case neverSleep
+    case custom
 }
 
 /// 合盖行为模式选项
 enum LidMode: Equatable {
-    case sleepOnLidClose     // 合盖后正常睡眠（macOS 默认行为）
-    case noSleepOnLidClose   // 合盖后保持唤醒（通过 caffeinate 进程实现）
+    case sleepOnLidClose
+    case noSleepOnLidClose
+}
+
+/// 休眠模式选项（对应 pmset hibernatemode）
+enum HibernateMode: Int, Equatable, CaseIterable {
+    case memoryOnly   = 0   // 纯内存：不写磁盘，唤醒最快，断电丢数据
+    case hybrid       = 3   // 混合（默认）：内存+磁盘双写，正常走内存，断电走磁盘
+    case deepHibernate = 25  // 深度休眠：内存写盘后 RAM 断电，零耗电，唤醒慢
 }
 
 /// 操作状态枚举 — 用于追踪每个设置项的应用状态
@@ -62,21 +69,17 @@ final class HibernateViewModel: ObservableObject {
     /// 磁盘空闲后的休眠超时分钟数（仅在 custom 模式下生效）
     @Published var diskSleepMinutes: Int = 10
 
-    // MARK: Lid Mode（合盖行为设置）
-    /// 当前选择的合盖行为模式
+    // MARK: Lid Mode
     @Published var lidMode: LidMode = .sleepOnLidClose
 
-    // MARK: Power Button Hibernate（电源键休眠设置）
-    /// 开启后按下电源键将触发真正的磁盘休眠（hibernatemode 25）：
-    /// 系统将内存内容写入磁盘休眠镜像，然后完全断电 RAM，
-    /// 实现零耗电深度休眠；未勾选时恢复 macOS 默认混合模式（hibernatemode 3）。
-    @Published var powerButtonHibernate: Bool = false
+    // MARK: Hibernate Mode（休眠模式）
+    @Published var hibernateMode: HibernateMode = .hybrid
 
-    // MARK: Status（各功能区块的操作状态）
+    // MARK: Status
     @Published var sleepStatus: ActionStatus = .idle
     @Published var diskSleepStatus: ActionStatus = .idle
     @Published var lidStatus: ActionStatus = .idle
-    @Published var powerButtonHibernateStatus: ActionStatus = .idle
+    @Published var hibernateModeStatus: ActionStatus = .idle
     @Published var applyAllStatus: ActionStatus = .idle
 
     // MARK: System Info（系统信息）
@@ -127,13 +130,13 @@ final class HibernateViewModel: ObservableObject {
             diskSleepMinutes = diskVal
         }
 
-        // --- 合盖行为：disablesleep 1 表示"合盖不睡眠" ---
+        // --- 合盖行为
         let disableSleep = intVal("disablesleep") ?? 0
         lidMode = disableSleep == 1 ? .noSleepOnLidClose : .sleepOnLidClose
 
-        // --- 电源键休眠：hibernatemode 25 表示开启 ---
-        let hibernateMode = intVal("hibernatemode") ?? 3
-        powerButtonHibernate = (hibernateMode == 25)
+        // --- 休眠模式
+        let hm = intVal("hibernatemode") ?? 3
+        hibernateMode = HibernateMode(rawValue: hm) ?? .hybrid
     }
 
     /// 执行 `pmset -g` 命令，提取 sleep/displaysleep/disksleep 相关行，
@@ -214,55 +217,45 @@ final class HibernateViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Apply Lid Mode（应用合盖行为设置）
+    // MARK: - Apply Lid Mode
 
-    /// 控制合盖后的系统行为。
-    ///
-    /// 与「电源键休眠」的交互说明：
-    /// - disablesleep=1 会全局禁止所有睡眠，包括按电源键，因此：
-    ///   - 合盖不睡眠 + 电源键休眠关闭 → disablesleep=1（全封）
-    ///   - 合盖不睡眠 + 电源键休眠开启 → disablesleep=0，仅靠 caffeinate 防合盖睡眠，
-    ///     保留电源键触发 hibernatemode=25 的路径
+    /// 合盖行为联动休眠模式：
+    /// - 合盖不休眠 + deepHibernate → disablesleep=0 + caffeinate（保留电源键路径）
+    /// - 合盖不休眠 + 其他           → disablesleep=1 + caffeinate（全封）
+    /// - 合盖休眠                    → 恢复默认
     func applyLidMode() async {
         lidStatus = .applying
         do {
             stopCaffeinate()
-
             switch lidMode {
             case .sleepOnLidClose:
-                // 恢复默认行为，hibernatemode 由「电源键休眠」设置决定
-                let restoreCmd = [
+                let cmd = [
                     "pmset -a disablesleep 0",
                     "pmset -a standby 1",
                     "pmset -a networkoversleep 0",
                 ].joined(separator: "; ")
-                try await ShellHelper.runWithAdmin(restoreCmd)
+                try await ShellHelper.runWithAdmin(cmd)
                 _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
-
             case .noSleepOnLidClose:
-                if powerButtonHibernate {
-                    // 电源键休眠开启时：不能用 disablesleep=1（会阻止电源键休眠）
-                    // 改为只靠 caffeinate 防合盖睡眠，保留电源键通路
+                if hibernateMode == .deepHibernate {
                     let cmd = [
-                        "pmset -a disablesleep 0",     // 不全局禁止，保留电源键路径
+                        "pmset -a disablesleep 0",
                         "pmset -a standby 0",
-                        "pmset -a hibernatemode 25",   // 电源键触发深度休眠
+                        "pmset -a hibernatemode 25",
                         "pmset -a networkoversleep 1",
                     ].joined(separator: "; ")
                     try await ShellHelper.runWithAdmin(cmd)
-                    // caffeinate -dim（去掉 -s，不阻止系统睡眠，只阻止自动睡眠）
-                    caffeinateProcess = try ShellHelper.launchCaffeinate()
                 } else {
-                    // 电源键休眠关闭：用 disablesleep=1 完全封死所有睡眠
+                    let hmVal = hibernateMode.rawValue
                     let cmd = [
                         "pmset -a disablesleep 1",
                         "pmset -a standby 0",
-                        "pmset -a hibernatemode 0",
+                        "pmset -a hibernatemode \(hmVal)",
                         "pmset -a networkoversleep 1",
                     ].joined(separator: "; ")
                     try await ShellHelper.runWithAdmin(cmd)
-                    caffeinateProcess = try ShellHelper.launchCaffeinate()
                 }
+                caffeinateProcess = try ShellHelper.launchCaffeinate()
             }
             lidStatus = .applied
             refreshPmsetInfo()
@@ -271,72 +264,45 @@ final class HibernateViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Apply Power Button Hibernate（应用电源键休眠设置）
+    // MARK: - Apply Hibernate Mode
 
-    /// 控制按下电源键时是否进入真正的磁盘休眠。
-    /// 会根据合盖模式决定是否调整 disablesleep，避免互相覆盖。
-    func applyPowerButtonHibernate() async {
-        powerButtonHibernateStatus = .applying
+    /// 应用休眠模式，同时联动合盖行为的 disablesleep 设置。
+    func applyHibernateMode() async {
+        hibernateModeStatus = .applying
         do {
-            if powerButtonHibernate {
-                // 开启：写入 hibernatemode 25
-                // 若合盖不睡眠模式开启，同步确保 disablesleep=0（否则电源键无效）
-                var cmds = ["pmset -a hibernatemode 25", "pmset -a standby 0"]
+            var cmds: [String]
+            switch hibernateMode {
+            case .memoryOnly:
+                cmds = ["pmset -a hibernatemode 0", "pmset -a standby 0"]
+            case .hybrid:
+                cmds = ["pmset -a hibernatemode 3", "pmset -a standby 1"]
+            case .deepHibernate:
+                cmds = ["pmset -a hibernatemode 25", "pmset -a standby 0"]
+                // deepHibernate 需要 disablesleep=0 才能让电源键生效
                 if lidMode == .noSleepOnLidClose {
                     cmds.append("pmset -a disablesleep 0")
                 }
-                try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
-            } else {
-                // 关闭：恢复 hibernatemode 3
-                // 若合盖不睡眠模式开启，恢复 disablesleep=1
-                var cmds = ["pmset -a hibernatemode 3", "pmset -a standby 1"]
-                if lidMode == .noSleepOnLidClose {
-                    cmds.append("pmset -a disablesleep 1")
-                }
-                try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
             }
-            powerButtonHibernateStatus = .applied
+            try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
+            hibernateModeStatus = .applied
             refreshPmsetInfo()
         } catch {
-            powerButtonHibernateStatus = .error(error.localizedDescription)
+            hibernateModeStatus = .error(error.localizedDescription)
         }
     }
 
-    // MARK: - Apply All（一键全部应用）
+    // MARK: - Apply All
 
-    /// 依次应用所有设置：睡眠模式 → 磁盘睡眠 → 合盖模式 → 电源键休眠。
-    /// 任何一步失败都会立即停止并显示错误。
     func applyAll() async {
         applyAllStatus = .applying
-
-        // 第一步：应用睡眠模式
         await applySleepMode()
-        if case .error = sleepStatus {
-            applyAllStatus = .error("Sleep mode failed")
-            return
-        }
-
-        // 第二步：应用磁盘睡眠模式
+        if case .error = sleepStatus { applyAllStatus = .error("Auto sleep failed"); return }
         await applyDiskSleepMode()
-        if case .error = diskSleepStatus {
-            applyAllStatus = .error("Disk sleep mode failed")
-            return
-        }
-
-        // 第三步：应用合盖模式
+        if case .error = diskSleepStatus { applyAllStatus = .error("Disk hibernate failed"); return }
+        await applyHibernateMode()
+        if case .error = hibernateModeStatus { applyAllStatus = .error("Hibernate mode failed"); return }
         await applyLidMode()
-        if case .error = lidStatus {
-            applyAllStatus = .error("Lid mode failed")
-            return
-        }
-
-        // 第四步：应用电源键休眠设置
-        await applyPowerButtonHibernate()
-        if case .error = powerButtonHibernateStatus {
-            applyAllStatus = .error("Power hibernate failed")
-            return
-        }
-
+        if case .error = lidStatus { applyAllStatus = .error("Lid mode failed"); return }
         applyAllStatus = .applied
     }
 

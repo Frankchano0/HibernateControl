@@ -21,11 +21,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 400, height: 600)
+        popover.contentSize = NSSize(width: 400, height: 100) // 初始高度，会由内容自适应
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(
+        let hostingController = NSHostingController(
             rootView: ContentView().environmentObject(langManager)
         )
+        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        popover.contentViewController = hostingController
         popover.animates = true
     }
 
@@ -44,7 +46,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            // 弹出后获取底层 window，开启可拖拽 + 可调整大小
+            if let window = popover.contentViewController?.view.window {
+                window.makeKey()
+                window.styleMask.insert(.resizable)
+                window.isMovableByWindowBackground = true
+                window.minSize = NSSize(width: 360, height: 200)
+                window.maxSize = NSSize(width: 600, height: 1400)
+                // 透明度 85%
+                window.alphaValue = 0.95
+            }
         }
     }
 
