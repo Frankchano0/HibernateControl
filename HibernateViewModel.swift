@@ -363,13 +363,34 @@ final class HibernateViewModel: ObservableObject {
         }
     }
 
-    /// 立即触发深度休眠（先设置 hibernatemode 25，再执行 pmset sleepnow）
+    /// 立即执行睡眠/休眠：
+    /// 1. 先将 hibernatemode 设为当前选中模式
+    /// 2. 暂停 caffeinate（否则会阻止睡眠），睡眠后由系统唤醒时自动恢复
+    /// 3. 触发 pmset sleepnow
     func hibernateNow() async {
         hibernateNowStatus = .applying
         do {
-            let cmd = "pmset -a hibernatemode 25; pmset -a standby 0; pmset sleepnow"
-            try await ShellHelper.runWithAdmin(cmd)
+            // Step 1: 按选中模式设置 hibernatemode（需要 admin）
+            let hmVal = hibernateMode.rawValue
+            let standbyVal = hibernateMode == .hybrid ? 1 : 0
+            try await ShellHelper.runWithAdmin(
+                "pmset -a hibernatemode \(hmVal); pmset -a standby \(standbyVal)"
+            )
+
+            // Step 2: 暂停 caffeinate（否则阻止睡眠）
+            if caffeinateRunning {
+                caffeinateProcess?.terminate()
+                caffeinateProcess = nil
+                _ = ShellHelper.run("pkill -f caffeinate 2>/dev/null")
+                caffeinateRunning = false
+            }
+
+            // Step 3: 触发睡眠（不需要 admin，直接在当前用户会话执行）
+            _ = ShellHelper.run("pmset sleepnow")
+
             hibernateNowStatus = .applied
+            // 刷新系统配置显示
+            refreshPmsetInfo()
         } catch {
             hibernateNowStatus = .error(error.localizedDescription)
         }

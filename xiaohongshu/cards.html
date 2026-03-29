@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Noto Sans SC',sans-serif; background:#f5f5f5; display:flex; flex-wrap:wrap; gap:30px; padding:40px; justify-content:center; }
+  .card { width:1080px; height:1440px; overflow:hidden; flex-shrink:0; }
+
+  /* ========== 图1：封面 ========== */
+  .cover {
+    background:linear-gradient(160deg,#0d1b3e 0%,#1a237e 40%,#283593 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    color:white; text-align:center; padding:80px; position:relative;
+  }
+  .cover::before {
+    content:''; position:absolute; top:-200px; right:-200px;
+    width:600px; height:600px; border-radius:50%;
+    background:radial-gradient(circle,rgba(100,140,255,0.15),transparent 70%);
+  }
+  .cover::after {
+    content:''; position:absolute; bottom:-150px; left:-150px;
+    width:500px; height:500px; border-radius:50%;
+    background:radial-gradient(circle,rgba(130,100,255,0.1),transparent 70%);
+  }
+  .cover .badge {
+    background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.2);
+    padding:12px 28px; border-radius:30px; font-size:28px; letter-spacing:2px;
+    margin-bottom:60px; z-index:1;
+  }
+  .cover h1 {
+    font-size:88px; font-weight:800; line-height:1.25; z-index:1;
+    text-shadow:0 4px 30px rgba(0,0,0,0.3); margin-bottom:40px;
+  }
+  .cover .sub {
+    font-size:36px; color:rgba(255,255,255,0.7); z-index:1; margin-bottom:80px;
+  }
+  .cover .icon-area {
+    z-index:1; display:flex; align-items:center; gap:20px;
+    background:rgba(255,255,255,0.08); padding:24px 48px; border-radius:24px;
+    border:1px solid rgba(255,255,255,0.1);
+  }
+  .cover .icon-area img { width:80px; height:80px; border-radius:18px; }
+  .cover .icon-area span { font-size:32px; font-weight:600; }
+  .cover .tags {
+    position:absolute; bottom:60px; font-size:24px; color:rgba(255,255,255,0.4); z-index:1;
+  }
+
+  /* ========== 图2：痛点 ========== */
+  .pain {
+    background:#faf8f5; display:flex; flex-direction:column; padding:100px 90px;
+  }
+  .pain h2 {
+    font-size:64px; font-weight:800; color:#1a1a1a; margin-bottom:60px;
+  }
+  .pain .item {
+    display:flex; align-items:flex-start; gap:24px;
+    padding:36px 40px; margin-bottom:24px;
+    background:white; border-radius:20px;
+    box-shadow:0 2px 12px rgba(0,0,0,0.04);
+  }
+  .pain .emoji { font-size:48px; flex-shrink:0; }
+  .pain .text { font-size:36px; color:#333; line-height:1.5; padding-top:6px; }
+
+  /* ========== 图3：功能总览 ========== */
+  .features {
+    background:white; display:flex; flex-direction:column; padding:100px 80px;
+  }
+  .features h2 {
+    font-size:64px; font-weight:800; color:#1a1a1a; margin-bottom:50px; text-align:center;
+  }
+  .feat-grid {
+    display:grid; grid-template-columns:1fr 1fr; gap:24px; flex:1;
+  }
+  .feat-card {
+    background:#f8f9fc; border-radius:24px; padding:44px 36px;
+    display:flex; flex-direction:column; align-items:center; text-align:center;
+    border:1px solid #eee;
+  }
+  .feat-card .icon {
+    width:72px; height:72px; border-radius:18px; display:flex; align-items:center;
+    justify-content:center; font-size:36px; margin-bottom:20px; color:white;
+  }
+  .feat-card .name { font-size:34px; font-weight:700; color:#1a1a1a; margin-bottom:10px; }
+  .feat-card .desc { font-size:24px; color:#888; line-height:1.5; }
+  .ic-purple { background:linear-gradient(135deg,#7c3aed,#8b5cf6); }
+  .ic-orange { background:linear-gradient(135deg,#ea580c,#f97316); }
+  .ic-teal   { background:linear-gradient(135deg,#0d9488,#14b8a6); }
+  .ic-blue   { background:linear-gradient(135deg,#2563eb,#3b82f6); }
+  .ic-red    { background:linear-gradient(135deg,#dc2626,#ef4444); }
+  .ic-indigo { background:linear-gradient(135deg,#4338ca,#6366f1); }
+
+  /* ========== 图4：对比 ========== */
+  .compare {
+    background:linear-gradient(180deg,#f0f4ff,#fff); display:flex; flex-direction:column; padding:100px 80px;
+  }
+  .compare h2 {
+    font-size:56px; font-weight:800; color:#1a1a1a; margin-bottom:50px; text-align:center;
+  }
+  .compare table {
+    width:100%; border-collapse:separate; border-spacing:0; font-size:28px;
+    border-radius:20px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.06);
+  }
+  .compare th {
+    background:#1a237e; color:white; padding:28px 20px; font-weight:600; text-align:center;
+  }
+  .compare th:first-child { text-align:left; padding-left:36px; }
+  .compare td {
+    padding:24px 20px; text-align:center; background:white; border-bottom:1px solid #f0f0f0;
+  }
+  .compare td:first-child { text-align:left; padding-left:36px; font-weight:600; color:#333; }
+  .compare .hl { background:#f0f7ff; }
+  .compare .hlth { background:#0d47a1; }
+  .compare .free { color:#16a34a; font-weight:700; }
+  .compare .paid { color:#dc2626; }
+  .compare .bottom-bar {
+    margin-top:60px; text-align:center;
+    font-size:32px; color:#555; line-height:1.8;
+  }
+  .compare .gh {
+    display:inline-block; margin-top:20px; padding:16px 40px;
+    background:#1a237e; color:white; border-radius:14px; font-size:28px; font-weight:600;
+  }
+
+  /* ========== 图5：亮点 ========== */
+  .highlights {
+    background:#0d1b3e; display:flex; flex-direction:column; align-items:center;
+    padding:100px 80px; color:white; text-align:center;
+  }
+  .highlights h2 { font-size:60px; font-weight:800; margin-bottom:60px; }
+  .hl-grid { display:grid; grid-template-columns:1fr 1fr; gap:24px; width:100%; }
+  .hl-item {
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    border-radius:20px; padding:40px 30px; text-align:center;
+  }
+  .hl-item .em { font-size:48px; margin-bottom:16px; }
+  .hl-item .t { font-size:30px; font-weight:700; margin-bottom:8px; }
+  .hl-item .d { font-size:22px; color:rgba(255,255,255,0.6); line-height:1.5; }
+  .highlights .cta {
+    margin-top:60px; font-size:36px; font-weight:700;
+    background:rgba(255,255,255,0.1); padding:20px 60px; border-radius:16px;
+    border:1px solid rgba(255,255,255,0.15);
+  }
+</style>
+</head>
+<body>
+
+<!-- 图1：封面 -->
+<div class="card cover">
+  <div class="badge">macOS 菜单栏工具</div>
+  <h1>Mac 合盖后<br>到底在干啥？</h1>
+  <p class="sub">免费开源 · 菜单栏电源管理 · 零终端操作</p>
+  <div class="icon-area">
+    <img src="file:///tmp/hc_appicon.png" alt="icon">
+    <span>HibernateControl</span>
+  </div>
+  <div class="tags">#Mac好物分享 #开源软件 #效率工具</div>
+</div>
+
+<!-- 图2：痛点 -->
+<div class="card pain">
+  <h2>你遇到过这些问题吗？</h2>
+  <div class="item">
+    <span class="emoji">😤</span>
+    <span class="text"><b>合盖一夜电池掉光</b><br>不知道什么进程在偷偷阻止休眠</span>
+  </div>
+  <div class="item">
+    <span class="emoji">🤷</span>
+    <span class="text"><b>根本不知道当前是哪种休眠模式</b><br>纯内存？混合？深度？macOS 不告诉你</span>
+  </div>
+  <div class="item">
+    <span class="emoji">😰</span>
+    <span class="text"><b>断电后数据全没了</b><br>因为系统用的是「纯内存」模式，你根本不知道</span>
+  </div>
+  <div class="item">
+    <span class="emoji">💻</span>
+    <span class="text"><b>想改设置？先学终端命令</b><br>pmset、caffeinate、hibernatemode...普通人看不懂</span>
+  </div>
+  <div class="item">
+    <span class="emoji">🔍</span>
+    <span class="text"><b>设置显示「已启用」但其实没生效</b><br>后台进程悄悄持有了「阻止睡眠断言」</span>
+  </div>
+</div>
+
+<!-- 图3：功能总览 -->
+<div class="card features">
+  <h2>6 大功能 一图看懂</h2>
+  <div class="feat-grid">
+    <div class="feat-card">
+      <div class="icon ic-indigo">🌙</div>
+      <div class="name">自动休眠</div>
+      <div class="desc">电池/充电分别设置<br>或直接永不休眠</div>
+    </div>
+    <div class="feat-card">
+      <div class="icon ic-orange">💾</div>
+      <div class="name">磁盘休眠</div>
+      <div class="desc">控制硬盘空闲多久后停转<br>适配外接硬盘场景</div>
+    </div>
+    <div class="feat-card">
+      <div class="icon ic-teal">💻</div>
+      <div class="name">合盖行为</div>
+      <div class="desc">合盖继续跑 or 直接睡<br>一键切换</div>
+    </div>
+    <div class="feat-card">
+      <div class="icon ic-purple">😴</div>
+      <div class="name">三种休眠模式</div>
+      <div class="desc">纯内存/混合/深度<br>附详细对比说明</div>
+    </div>
+    <div class="feat-card">
+      <div class="icon ic-red">🔘</div>
+      <div class="name">电源键行为</div>
+      <div class="desc">短按关屏 or 进入睡眠<br>你说了算</div>
+    </div>
+    <div class="feat-card">
+      <div class="icon ic-blue">📋</div>
+      <div class="name">系统配置面板</div>
+      <div class="desc">实时状态 + 展开看命令<br>白话解读每一项</div>
+    </div>
+  </div>
+</div>
+
+<!-- 图4：对比 -->
+<div class="card compare">
+  <h2>和付费竞品比一比 💪</h2>
+  <table>
+    <tr>
+      <th>对比维度</th>
+      <th>Amphetamine</th>
+      <th>AlDente</th>
+      <th class="hlth">HibernateControl</th>
+    </tr>
+    <tr>
+      <td>💰 价格</td>
+      <td>免费（功能少）</td>
+      <td class="paid">¥168/年</td>
+      <td class="hl free">完全免费</td>
+    </tr>
+    <tr>
+      <td>😴 休眠模式切换</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td class="hl">✅ 三种模式</td>
+    </tr>
+    <tr>
+      <td>🔍 系统状态透视</td>
+      <td>❌</td>
+      <td>部分</td>
+      <td class="hl">✅ 全量可视化</td>
+    </tr>
+    <tr>
+      <td>🚫 进程阻止检测</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td class="hl">✅ 自动识别</td>
+    </tr>
+    <tr>
+      <td>📖 开源透明</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td class="hl free">✅ MIT</td>
+    </tr>
+    <tr>
+      <td>🌐 联网</td>
+      <td>❌ 有</td>
+      <td>❌ 有</td>
+      <td class="hl free">完全离线</td>
+    </tr>
+    <tr>
+      <td>🇨🇳 中文支持</td>
+      <td>❌</td>
+      <td>❌</td>
+      <td class="hl">✅ 中英双语</td>
+    </tr>
+  </table>
+  <div class="bottom-bar">
+    GitHub 搜索 <b>HibernateControl</b> 即可下载
+    <br>
+    <span class="gh">github.com/Frankchano0/HibernateControl</span>
+  </div>
+</div>
+
+<!-- 图5：亮点总结 -->
+<div class="card highlights">
+  <h2>为什么选 HibernateControl ✨</h2>
+  <div class="hl-grid">
+    <div class="hl-item">
+      <div class="em">🆓</div>
+      <div class="t">完全免费</div>
+      <div class="d">MIT 开源协议<br>永久免费无广告</div>
+    </div>
+    <div class="hl-item">
+      <div class="em">🔒</div>
+      <div class="t">隐私安全</div>
+      <div class="d">完全离线运行<br>不收集任何数据</div>
+    </div>
+    <div class="hl-item">
+      <div class="em">⚡</div>
+      <div class="t">极致轻量</div>
+      <div class="d">原生 SwiftUI<br>不到 1MB 大小</div>
+    </div>
+    <div class="hl-item">
+      <div class="em">🧠</div>
+      <div class="t">透明可控</div>
+      <div class="d">每项设置展开看命令<br>知其然更知其所以然</div>
+    </div>
+    <div class="hl-item">
+      <div class="em">🌐</div>
+      <div class="t">中英双语</div>
+      <div class="d">右键一键切换<br>国人友好</div>
+    </div>
+    <div class="hl-item">
+      <div class="em">🍎</div>
+      <div class="t">Apple Silicon</div>
+      <div class="d">专为 M1/M2/M3/M4<br>原生优化</div>
+    </div>
+  </div>
+  <div class="cta">📥 GitHub 搜「HibernateControl」免费下载</div>
+</div>
+
+</body>
+</html>

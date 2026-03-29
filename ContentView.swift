@@ -277,15 +277,7 @@ struct ContentView: View {
             }
         }()
 
-        // 执行按钮 label 和 icon 随模式变化
-        let (runIcon, runLabel): (String, String) = {
-            switch mode {
-            case .memoryOnly:    return ("bolt.fill",      lang.t("立即睡眠",     "Sleep Now"))
-            case .hybrid:        return ("sleep",          lang.t("立即睡眠",     "Sleep Now"))
-            case .deepHibernate: return ("moon.zzz.fill",  lang.t("立即深度休眠", "Hibernate Now"))
-            }
-        }()
-
+        // （执行按钮已移除）
         VStack(spacing: 8) {
             VStack(spacing: 4) {
                 ForEach(rows.indices, id: \.self) { i in
@@ -308,24 +300,6 @@ struct ContentView: View {
             .padding(.vertical, 8)
             .background(AppTheme.powerHibernate.accent.opacity(0.06),
                         in: RoundedRectangle(cornerRadius: 8))
-
-            // 立即执行按钮
-            Button(action: { Task { await viewModel.hibernateNow() } }) {
-                HStack(spacing: 5) {
-                    if viewModel.hibernateNowStatus.isApplying {
-                        ProgressView().controlSize(.mini).scaleEffect(0.7)
-                    } else {
-                        Image(systemName: runIcon).font(.system(size: 10))
-                    }
-                    Text(runLabel).font(.system(size: 11, weight: .medium))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.powerHibernate.accent)
-            .controlSize(.small)
-            .disabled(viewModel.hibernateNowStatus.isApplying)
         }
         .animation(.easeInOut(duration: 0.15), value: mode)
     }
@@ -335,38 +309,36 @@ struct ContentView: View {
     private var pmsetInfoCard: some View {
         VStack(spacing: 0) {
             // 标题行（可折叠）
-            Button(action: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text(lang.t("系统配置", "System Config"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if showPmsetInfo {
+                    Button(action: { viewModel.refreshPmsetInfo() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.blue)
+                            .padding(4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
+                    .animation(.easeInOut(duration: 0.2), value: showPmsetInfo)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.2)) { showPmsetInfo.toggle() }
                 if showPmsetInfo { viewModel.refreshPmsetInfo() }
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Text(lang.t("系统配置", "System Config"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if showPmsetInfo {
-                        Button(action: {
-                            withAnimation { viewModel.refreshPmsetInfo() }
-                        }) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.blue)
-                                .padding(4)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
-                }
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, AppTheme.cardPadding)
             .padding(.vertical, 8)
             .background(AppTheme.cardBackground,
@@ -882,18 +854,21 @@ struct SettingCard<Content: View>: View {
                 }
                 statusBadge
                 if isCollapsible {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
-                    }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(collapsed ? 0 : 90))
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(collapsed ? 0 : 90))
+                        .animation(.easeInOut(duration: 0.2), value: collapsed)
                 }
                 if showApplyButton {
                     applyActionButton
+                }
+            }
+            // 整个标题行可点击折叠（排除应用按钮区域）
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if isCollapsible {
+                    withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
                 }
             }
             if !collapsed {
