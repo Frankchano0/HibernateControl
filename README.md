@@ -6,6 +6,19 @@
 
 ## 中文
 
+### 为什么需要它？
+
+macOS 的休眠管理隐藏在终端命令 `pmset` 背后，普通用户几乎无从下手：
+
+- 系统偏好设置里只有简单的"几分钟后关闭显示器"，**看不到 hibernatemode、standby、disablesleep 等关键参数**
+- 不知道当前到底是"纯内存睡眠"还是"深度休眠"，断电后数据是否安全？
+- 合盖后到底有没有休眠？显示"已启用"但 caffeinate 进程可能正在偷偷阻止
+- 想改一个设置，需要查文档、敲命令、还要记住十几个参数名
+
+**HibernateControl 把这些全部可视化**，菜单栏一点，所有状态一览无余，改完即应用。
+
+---
+
 macOS 菜单栏电源管理工具，无需终端，直观控制系统休眠、磁盘休眠、合盖行为、休眠模式与电源键行为，并提供可展开的系统配置实时状态面板。
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)
@@ -107,7 +120,18 @@ sudo xattr -cr /Applications/HibernateControl.app
 
 ## English
 
-A macOS menu bar utility for managing sleep, hibernate, lid behavior, and power button actions — no Terminal required. Features a live System Config panel that shows real pmset values with plain-English explanations.
+### Why does this exist?
+
+macOS sleep management is powerful but completely hidden from normal users:
+
+- System Preferences only shows a basic "turn off display after X minutes" slider — **there's no UI for hibernatemode, standby, disablesleep, or any of the parameters that actually matter**
+- You can't tell whether your Mac is doing a fast RAM sleep or a safe deep hibernate — so if the battery dies overnight, will your work survive?
+- "Sleep on lid close" sounds simple, but a background process like caffeinate could be silently blocking it — and macOS won't tell you
+- Making any change requires digging through man pages, memorizing a dozen `pmset` flag names, and running Terminal commands with sudo
+
+**HibernateControl puts everything in a menu bar icon.** See the real system state at a glance, change settings with a click, and understand exactly what each option does — no Terminal required.
+
+---
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-blue)
 ![Chip](https://img.shields.io/badge/chip-Apple%20Silicon-green)
