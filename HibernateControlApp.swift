@@ -14,7 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "bolt.shield.fill", accessibilityDescription: "HibernateControl")
+            button.image = makeStatusBarIcon()
+            button.image?.isTemplate = true   // 自动适配深/浅色菜单栏
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.target = self
@@ -81,8 +82,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil  // 用完即清，避免影响左键行为
     }
 
-    @objc private func toggleLanguage() {
-        langManager.isEnglish.toggle()
+    /// 用代码绘制状态栏图标：月牙 + 暂停竖条（isTemplate=true，自动适配深/浅色）
+    private func makeStatusBarIcon() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let ctx = NSGraphicsContext.current!.cgContext
+            ctx.setFillColor(NSColor.black.cgColor)
+
+            let w = rect.width, h = rect.height
+            let cx = w * 0.44, cy = h * 0.5
+
+            // ── 月牙：外圆路径减去内偏移圆 ──
+            let outerR: CGFloat = h * 0.42
+            let innerR: CGFloat = h * 0.34
+            let dx: CGFloat = h * 0.14   // 内圆向右偏移
+
+            let outerPath = CGMutablePath()
+            outerPath.addArc(center: CGPoint(x: cx, y: cy),
+                             radius: outerR, startAngle: 0,
+                             endAngle: .pi * 2, clockwise: false)
+
+            let innerPath = CGMutablePath()
+            innerPath.addArc(center: CGPoint(x: cx + dx, y: cy + h * 0.04),
+                             radius: innerR, startAngle: 0,
+                             endAngle: .pi * 2, clockwise: false)
+
+            // 月牙 = 外圆 - 内圆（使用 even-odd 规则）
+            let moonPath = CGMutablePath()
+            moonPath.addPath(outerPath)
+            moonPath.addPath(innerPath)
+            ctx.addPath(moonPath)
+            ctx.fillPath(using: .evenOdd)
+
+            // ── 暂停竖条（右上角）──
+            let barW: CGFloat = w * 0.10
+            let barH: CGFloat = h * 0.34
+            let barY: CGFloat = cy + h * 0.06
+            let bar1X: CGFloat = w * 0.66
+            let bar2X: CGFloat = w * 0.80
+
+            let r1 = CGRect(x: bar1X - barW/2, y: barY - barH/2, width: barW, height: barH)
+            let r2 = CGRect(x: bar2X - barW/2, y: barY - barH/2, width: barW, height: barH)
+            ctx.fill([r1, r2])
+
+            return true
+        }
+        return image
+    }
+
+    @objc private func toggleLanguage() {        langManager.isEnglish.toggle()
         // 切换语言后刷新 popover 内容
         popover.contentViewController = NSHostingController(
             rootView: ContentView().environmentObject(langManager)
