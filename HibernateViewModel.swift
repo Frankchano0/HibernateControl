@@ -21,6 +21,12 @@ enum LidMode: Equatable {
     case noSleepOnLidClose
 }
 
+/// 短按电源键行为
+enum PowerButtonMode: Equatable {
+    case displaySleep  // 仅关闭屏幕
+    case systemSleep   // 系统进入睡眠/休眠
+}
+
 /// 休眠模式选项（对应 pmset hibernatemode）
 enum HibernateMode: Int, Equatable, CaseIterable {
     case memoryOnly   = 0   // 纯内存：不写磁盘，唤醒最快，断电丢数据
@@ -75,6 +81,12 @@ final class HibernateViewModel: ObservableObject {
     // MARK: Hibernate Mode（休眠模式）
     @Published var hibernateMode: HibernateMode = .hybrid
 
+    // MARK: Power Button（电源键行为）
+    /// 短按电源键行为：关闭屏幕 / 进入睡眠
+    @Published var powerButtonMode: PowerButtonMode = .systemSleep
+    @Published var powerButtonStatus: ActionStatus = .idle
+    @Published var hibernateNowStatus: ActionStatus = .idle
+
     // MARK: Status
     @Published var sleepStatus: ActionStatus = .idle
     @Published var diskSleepStatus: ActionStatus = .idle
@@ -83,13 +95,34 @@ final class HibernateViewModel: ObservableObject {
     @Published var applyAllStatus: ActionStatus = .idle
 
     // MARK: System Info（系统信息）
-    /// 当前 pmset 电源管理状态的文本输出
+    /// 当前 pmset 电源管理状态的文本输出（raw，供 debug 保留）
     @Published var currentPmsetInfo: String = ""
+
+    // MARK: Parsed System Config（结构化系统配置，用于 UI 展示）
+    @Published var sysStandby: Int = -1          // -1 = 未读取
+    @Published var sysNetworkOverSleep: Int = -1
+    @Published var sysDiskSleep: Int = -1
+    @Published var sysSystemSleep: Int = -1
+    @Published var sysDisplaySleep: Int = -1
+    @Published var sysHibernateMode: Int = -1
+    @Published var sysHibernateFile: String = ""
+    @Published var sysTcpKeepAlive: Int = -1
+    @Published var sysDisableSleep: Int = -1
+    /// sleep/displaysleep 被哪些进程阻止（空 = 未被阻止）
+    @Published var sysSleepBlockers: [String] = []
+    @Published var sysDisplaySleepBlockers: [String] = []
 
     // MARK: Internal（内部状态）
     /// caffeinate 子进程引用，用于在"合盖不睡眠"模式下保持系统唤醒。
-    /// 当切回"合盖睡眠"时会终止此进程。
     private var caffeinateProcess: Process?
+
+    /// 缓存的 caffeinate 运行状态（由 refreshPmsetInfo 更新，避免在 view body 中同步执行 shell）
+    @Published var caffeinateRunning: Bool = false
+
+    /// 合盖是否会触发休眠（纯计算，读缓存值，不执行 shell）
+    var lidWillSleep: Bool {
+        sysDisableSleep != 1 && !caffeinateRunning
+    }
 
     init() {
         refreshPmsetInfo()  // 启动时立即读取当前系统电源设置
@@ -130,48 +163,65 @@ final class HibernateViewModel: ObservableObject {
             diskSleepMinutes = diskVal
         }
 
-        // --- 合盖行为
+        // --- 合盖行为（disablesleep=1 明确禁用，或检测到 caffeinate 在跑）
         let disableSleep = intVal("disablesleep") ?? 0
-        lidMode = disableSleep == 1 ? .noSleepOnLidClose : .sleepOnLidClose
+        let caffRunning = !ShellHelper.run("pgrep caffeinate 2>/dev/null").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        lidMode = (disableSleep == 1 || caffRunning) ? .noSleepOnLidClose : .sleepOnLidClose
 
         // --- 休眠模式
         let hm = intVal("hibernatemode") ?? 3
         hibernateMode = HibernateMode(rawValue: hm) ?? .hybrid
+
+        // --- 电源键行为
+        let pbds = ShellHelper.run("defaults read com.apple.loginwindow PowerButtonSleepsSystem 2>/dev/null").trimmingCharacters(in: .whitespacesAndNewlines)
+        // PowerButtonSleepsSystem=0 → 关屏；1或未设置 → 睡眠
+        powerButtonMode = (pbds == "0") ? .displaySleep : .systemSleep
     }
 
-    /// 执行 `pmset -g` 命令，提取 sleep/displaysleep/disksleep 相关行，
-    /// 更新 currentPmsetInfo 供 UI 显示。
+    /// 执行 `pmset -g` 命令，解析所有关键字段到结构化属性，同时更新 currentPmsetInfo。
     func refreshPmsetInfo() {
-        let output = ShellHelper.run("pmset -g | grep -E '(hibernatefile|networkoversleep|disksleep|sleep|displaysleep|disablesleep|standby|hibernatemode|tcpkeepalive)'")
-        // 为每行 pmset 参数追加中文注释，方便用户理解
-        let annotated = output
-            .components(separatedBy: "\n")
-            .map { line -> String in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("hibernatefile") {
-                    return line + "  ← 休眠镜像文件路径"
-                } else if trimmed.hasPrefix("networkoversleep") {
-                    return line + "  ← 休眠时保持网络（1=是）"
-                } else if trimmed.hasPrefix("disablesleep") {
-                    return line + "  ← 全局禁用休眠（1=禁用，合盖不休眠）"
-                } else if trimmed.hasPrefix("disksleep") {
-                    return line + "  ← 磁盘空闲多久后休眠（0=永不）"
-                } else if trimmed.hasPrefix("displaysleep") {
-                    return line + "  ← 显示器空闲多久后关闭（0=永不）"
-                } else if trimmed.hasPrefix("standby") {
-                    return line + "  ← 深度待机（0=禁用，防长时间断电）"
-                } else if trimmed.hasPrefix("hibernatemode") {
-                    return line + "  ← 休眠模式（0=纯内存 /3=混合 /25=电源键深度休眠）"
-                } else if trimmed.hasPrefix("tcpkeepalive") {
-                    return line + "  ← TCP连接保活（1=开启）"
-                } else if trimmed.hasPrefix("sleep") {
-                    return line + "  ← 系统空闲多久后休眠（0=永不）"
-                } else {
-                    return line
-                }
-            }
-            .joined(separator: "\n")
-        currentPmsetInfo = annotated
+        let output = ShellHelper.run("pmset -g")
+        currentPmsetInfo = output
+
+        // 解析整数值：匹配 "  key  123" 或 "  key  123 (reason...)"
+        func intVal(_ key: String) -> Int {
+            guard let range = output.range(of: #"(?m)^\s*"# + key + #"\s+(\d+)"#, options: .regularExpression) else { return -1 }
+            let parts = String(output[range]).trimmingCharacters(in: .whitespaces).split(separator: " ")
+            return parts.last.flatMap { Int($0) } ?? -1
+        }
+        func strVal(_ key: String) -> String {
+            guard let range = output.range(of: #"(?m)^\s*"# + key + #"\s+(\S+)"#, options: .regularExpression) else { return "" }
+            let parts = String(output[range]).trimmingCharacters(in: .whitespaces).split(separator: " ")
+            return parts.last.map(String.init) ?? ""
+        }
+        // 解析 "key  0 (prevented by proc1, proc2)" 中的进程名列表
+        func blockers(for key: String) -> [String] {
+            let pattern = #"(?m)^\s*"# + key + #"\s+\d+\s+\(.*?prevented by ([^)]+)\)"#
+            guard let range = output.range(of: pattern, options: .regularExpression) else { return [] }
+            let matched = String(output[range])
+            guard let paren = matched.range(of: "prevented by ") else { return [] }
+            let tail = String(matched[paren.upperBound...])
+                .replacingOccurrences(of: ")", with: "")
+            // 去重，过滤掉 powerd/sharingd 这些系统守护进程，只留用户关心的
+            let all = tail.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            let userFacing = all.filter { !["powerd", "sharingd", "runningboardd"].contains($0) }
+            return Array(Set(userFacing)).sorted()
+        }
+
+        sysStandby          = intVal("standby")
+        sysNetworkOverSleep = intVal("networkoversleep")
+        sysDiskSleep        = intVal("disksleep")
+        sysSystemSleep      = intVal("sleep")
+        sysDisplaySleep     = intVal("displaysleep")
+        sysHibernateMode    = intVal("hibernatemode")
+        sysHibernateFile    = strVal("hibernatefile")
+        sysTcpKeepAlive     = intVal("tcpkeepalive")
+        sysDisableSleep     = intVal("disablesleep")
+        sysSleepBlockers        = blockers(for: "sleep")
+        sysDisplaySleepBlockers = blockers(for: "displaysleep")
+
+        caffeinateRunning = !ShellHelper.run("pgrep caffeinate 2>/dev/null")
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Apply Sleep Mode（应用睡眠设置）
@@ -288,6 +338,40 @@ final class HibernateViewModel: ObservableObject {
             refreshPmsetInfo()
         } catch {
             hibernateModeStatus = .error(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Apply Power Button Behavior
+
+    /// 电源键短按行为：
+    /// - displaySleep → 仅关屏（PowerButtonSleepsSystem = NO）
+    /// - systemSleep  → 系统睡眠（恢复默认）
+    func applyPowerButtonBehavior() async {
+        powerButtonStatus = .applying
+        do {
+            let cmd: String
+            switch powerButtonMode {
+            case .displaySleep:
+                cmd = "defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool NO"
+            case .systemSleep:
+                cmd = "defaults delete com.apple.loginwindow PowerButtonSleepsSystem 2>/dev/null; true"
+            }
+            try await ShellHelper.runWithAdmin(cmd)
+            powerButtonStatus = .applied
+        } catch {
+            powerButtonStatus = .error(error.localizedDescription)
+        }
+    }
+
+    /// 立即触发深度休眠（先设置 hibernatemode 25，再执行 pmset sleepnow）
+    func hibernateNow() async {
+        hibernateNowStatus = .applying
+        do {
+            let cmd = "pmset -a hibernatemode 25; pmset -a standby 0; pmset sleepnow"
+            try await ShellHelper.runWithAdmin(cmd)
+            hibernateNowStatus = .applied
+        } catch {
+            hibernateNowStatus = .error(error.localizedDescription)
         }
     }
 

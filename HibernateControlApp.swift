@@ -53,8 +53,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 window.isMovableByWindowBackground = true
                 window.minSize = NSSize(width: 360, height: 200)
                 window.maxSize = NSSize(width: 600, height: 1400)
-                // 透明度 85%
-                window.alphaValue = 0.95
+                // 透明度 100%（不透明）
+                window.alphaValue = 1.0
             }
         }
     }

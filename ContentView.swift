@@ -28,6 +28,8 @@ enum AppTheme {
     static let lid = SectionColor(icon: .teal, accent: .teal)
     /// 电源键休眠区块 — 紫色
     static let powerHibernate = SectionColor(icon: .purple, accent: .purple)
+    /// 电源键行为区块 — 红色
+    static let powerButton = SectionColor(icon: .red, accent: .red)
 }
 
 // MARK: - Content View（主界面）
@@ -40,7 +42,6 @@ struct ContentView: View {
     @StateObject private var viewModel = HibernateViewModel()
     @EnvironmentObject private var lang: LanguageManager
     @State private var showPmsetInfo = false
-    @State private var hibernateModeExpanded = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,6 +51,7 @@ struct ContentView: View {
                     diskSleepCard
                     lidModeCard
                     hibernateModeCard
+                    powerButtonCard
                     pmsetInfoCard
                 }
                 .padding(.horizontal, 16)
@@ -186,215 +188,395 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Power Button Hibernate Card（电源键休眠设置卡片）
-    // MARK: - Hibernate Mode Card（休眠模式设置卡片）
+    // MARK: - Power Button Card（电源键行为设置卡片）
+    // 短按电源键行为配置 + 立即深度休眠按钮
+
+    private var powerButtonCard: some View {
+        SettingCard(
+            icon: "power",
+            iconColor: AppTheme.powerButton.icon,
+            title: lang.t("电源键行为", "Power Button"),
+            status: viewModel.powerButtonStatus
+        ) {
+            VStack(spacing: 10) {
+                modePicker(
+                    selection: $viewModel.powerButtonMode,
+                    options: [
+                        (.displaySleep, lang.t("关闭屏幕", "Display Off"), "display.slash"),
+                        (.systemSleep,  lang.t("进入睡眠", "Sleep"),        "moon.fill"),
+                    ]
+                )
+                let desc = viewModel.powerButtonMode == .displaySleep
+                    ? lang.t("短按电源键仅关闭屏幕，系统继续运行", "Short press turns off display only, system keeps running")
+                    : lang.t("短按电源键使系统进入睡眠", "Short press puts system to sleep")
+                Text(desc)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+        } applyAction: {
+            await viewModel.applyPowerButtonBehavior()
+        }
+    }
+
+    // MARK: - Hibernate Mode Card（休眠模式 — 可折叠 + 说明框含执行按钮）
+
+    private var hibernateModeSummary: String {
+        switch viewModel.hibernateMode {
+        case .memoryOnly:    return lang.t("纯内存", "RAM Only")
+        case .hybrid:        return lang.t("混合",   "Hybrid")
+        case .deepHibernate: return lang.t("深度",   "Deep")
+        }
+    }
 
     private var hibernateModeCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 标题行（可点击折叠）
-            HStack(spacing: 8) {
-                Image(systemName: "sleep")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(AppTheme.powerHibernate.icon)
-                Text(lang.t("休眠模式", "Hibernate Mode"))
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-
-                // 缩起时显示当前模式名
-                if !hibernateModeExpanded {
-                    Text(currentHibernateModeName)
-                        .font(.system(size: 11))
-                        .foregroundStyle(AppTheme.powerHibernate.accent)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .background(AppTheme.powerHibernate.accent.opacity(0.1), in: Capsule())
-                }
-
-                // 状态徽标
-                hibernateModeStatusBadge
-
-                // 折叠箭头
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(hibernateModeExpanded ? 90 : 0))
-                    .animation(.easeInOut(duration: 0.2), value: hibernateModeExpanded)
-
-                // 应用按钮
-                Button(action: { Task { await viewModel.applyHibernateMode() } }) {
-                    Text(lang.t("应用", "Apply"))
-                        .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.mini)
-                .disabled(viewModel.hibernateModeStatus.isApplying)
+        SettingCard(
+            icon: "sleep",
+            iconColor: AppTheme.powerHibernate.icon,
+            title: lang.t("休眠模式", "Hibernate Mode"),
+            status: viewModel.hibernateModeStatus,
+            isCollapsible: true,
+            collapsedSummary: hibernateModeSummary
+        ) {
+            VStack(spacing: 10) {
+                modePicker(selection: $viewModel.hibernateMode, options: [
+                    (.memoryOnly,    lang.t("纯内存", "RAM Only"),  "bolt.fill"),
+                    (.hybrid,        lang.t("混合",   "Hybrid"),    "square.stack.fill"),
+                    (.deepHibernate, lang.t("深度",   "Deep"),      "moon.zzz.fill"),
+                ])
+                hibernateModeDetail(for: viewModel.hibernateMode)
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    hibernateModeExpanded.toggle()
-                }
-            }
-
-            // 展开内容
-            if hibernateModeExpanded {
-                VStack(spacing: 8) {
-                    ForEach([HibernateMode.memoryOnly, .hybrid, .deepHibernate], id: \.self) { mode in
-                        hibernateModeRow(mode: mode)
-                    }
-                }
-                .padding(.top, 10)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .padding(AppTheme.cardPadding)
-        .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
-    }
-
-    @ViewBuilder
-    private var hibernateModeStatusBadge: some View {
-        switch viewModel.hibernateModeStatus {
-        case .idle: EmptyView()
-        case .applying:
-            ProgressView().controlSize(.mini).scaleEffect(0.7)
-        case .applied:
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.green)
-        case .error:
-            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(.red)
-        }
-    }
-
-    private var currentHibernateModeName: String {
-        switch viewModel.hibernateMode {
-        case .memoryOnly:    return lang.t("纯内存", "Memory Only")
-        case .hybrid:        return lang.t("混合", "Hybrid")
-        case .deepHibernate: return lang.t("深度休眠", "Deep Hibernate")
+        } applyAction: {
+            await viewModel.applyHibernateMode()
         }
     }
 
     @ViewBuilder
-    private func hibernateModeRow(mode: HibernateMode) -> some View {
-        let isSelected = viewModel.hibernateMode == mode
-        let (icon, title, desc): (String, String, String) = {
+    private func hibernateModeDetail(for mode: HibernateMode) -> some View {
+        let rows: [(String, String, String)] = {
             switch mode {
             case .memoryOnly:
-                return ("bolt.fill",
-                        lang.t("纯内存", "Memory Only"),
-                        lang.t("唤醒最快，断电会丢数据，适合短时休眠", "Fastest wake. Data lost if power cut. Best for short naps."))
+                return [
+                    ("bolt.fill",               lang.t("唤醒速度", "Wake speed"),     lang.t("极快（<1s）",       "Fastest (<1s)")),
+                    ("exclamationmark.triangle", lang.t("断电保护", "Power-loss safe"), lang.t("否，断电丢数据",    "No – data lost")),
+                    ("battery.25",              lang.t("待机耗电", "Idle power"),      lang.t("正常（内存供电）",  "Normal (RAM on)")),
+                ]
             case .hybrid:
-                return ("square.stack.fill",
-                        lang.t("混合（默认）", "Hybrid (Default)"),
-                        lang.t("内存+磁盘双写，唤醒快，断电也能恢复", "Writes RAM + disk. Fast wake, safe if power cuts."))
+                return [
+                    ("bolt.fill",               lang.t("唤醒速度", "Wake speed"),     lang.t("快（<2s）",         "Fast (<2s)")),
+                    ("checkmark.shield.fill",   lang.t("断电保护", "Power-loss safe"), lang.t("是，磁盘有备份",    "Yes – disk backup")),
+                    ("battery.50",              lang.t("待机耗电", "Idle power"),      lang.t("正常（macOS 默认）","Normal (default)")),
+                ]
             case .deepHibernate:
-                return ("moon.zzz.fill",
-                        lang.t("深度休眠", "Deep Hibernate"),
-                        lang.t("RAM 完全断电，零耗电，唤醒慢，适合长时间不用", "RAM off, zero draw. Slow wake. Best for long periods."))
+                return [
+                    ("tortoise.fill",           lang.t("唤醒速度", "Wake speed"),     lang.t("慢（10–30s）",      "Slow (10–30s)")),
+                    ("checkmark.shield.fill",   lang.t("断电保护", "Power-loss safe"), lang.t("是，内存完全写盘",  "Yes – full RAM dump")),
+                    ("battery.100",             lang.t("待机耗电", "Idle power"),      lang.t("极低（RAM 断电）",  "Minimal (RAM off)")),
+                ]
             }
         }()
 
-        Button(action: {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                viewModel.hibernateMode = mode
+        // 执行按钮 label 和 icon 随模式变化
+        let (runIcon, runLabel): (String, String) = {
+            switch mode {
+            case .memoryOnly:    return ("bolt.fill",      lang.t("立即睡眠",     "Sleep Now"))
+            case .hybrid:        return ("sleep",          lang.t("立即睡眠",     "Sleep Now"))
+            case .deepHibernate: return ("moon.zzz.fill",  lang.t("立即深度休眠", "Hibernate Now"))
             }
-        }) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isSelected ? AppTheme.powerHibernate.accent : .secondary)
-                    .frame(width: 18)
+        }()
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-                    Text(desc)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(AppTheme.powerHibernate.accent)
+        VStack(spacing: 8) {
+            VStack(spacing: 4) {
+                ForEach(rows.indices, id: \.self) { i in
+                    HStack(spacing: 6) {
+                        Image(systemName: rows[i].0)
+                            .font(.system(size: 10))
+                            .foregroundStyle(AppTheme.powerHibernate.accent)
+                            .frame(width: 14, alignment: .center)
+                        Text(rows[i].1)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(rows[i].2)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.primary)
+                    }
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                isSelected
-                    ? AnyShapeStyle(AppTheme.powerHibernate.accent.opacity(0.08))
-                    : AnyShapeStyle(Color.clear),
-                in: RoundedRectangle(cornerRadius: 8)
-            )
-            .contentShape(Rectangle())
+            .padding(.vertical, 8)
+            .background(AppTheme.powerHibernate.accent.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 8))
+
+            // 立即执行按钮
+            Button(action: { Task { await viewModel.hibernateNow() } }) {
+                HStack(spacing: 5) {
+                    if viewModel.hibernateNowStatus.isApplying {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                    } else {
+                        Image(systemName: runIcon).font(.system(size: 10))
+                    }
+                    Text(runLabel).font(.system(size: 11, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppTheme.powerHibernate.accent)
+            .controlSize(.small)
+            .disabled(viewModel.hibernateNowStatus.isApplying)
         }
-        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: mode)
     }
 
-    // MARK: - Pmset Info Card（系统电源状态信息卡片）
-    // 可折叠的面板，点击展开后显示当前 pmset 电源管理设置。
-    // 执行 `pmset -g` 命令获取 sleep / displaysleep / disksleep 的当前值。
+    // MARK: - System Config Card（系统配置卡片 — 结构化展示）
 
     private var pmsetInfoCard: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showPmsetInfo.toggle()
-                    }
-                    if showPmsetInfo { viewModel.refreshPmsetInfo() }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "terminal.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text(lang.t("系统状态", "System State"))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
-                    }
-                }
-                .buttonStyle(.plain)
-
-                // 刷新按钮 — 重新读取 pmset 当前状态
-                if showPmsetInfo {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            viewModel.refreshPmsetInfo()
+            // 标题行（可折叠）
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) { showPmsetInfo.toggle() }
+                if showPmsetInfo { viewModel.refreshPmsetInfo() }
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(lang.t("系统配置", "System Config"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if showPmsetInfo {
+                        Button(action: {
+                            withAnimation { viewModel.refreshPmsetInfo() }
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.blue)
+                                .padding(4)
+                                .contentShape(Rectangle())
                         }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.blue)
-                            .padding(4)
-                            .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
                     }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(showPmsetInfo ? 90 : 0))
                 }
             }
+            .buttonStyle(.plain)
             .padding(.horizontal, AppTheme.cardPadding)
             .padding(.vertical, 8)
-            .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
+            .background(AppTheme.cardBackground,
+                        in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
 
             if showPmsetInfo {
-                Text(viewModel.currentPmsetInfo.isEmpty ? "Loading..." : viewModel.currentPmsetInfo)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                    .padding(.horizontal, 4)
+                systemConfigGrid
                     .padding(.top, 4)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
+        }
+    }
+
+    /// 结构化系统配置网格
+    private var systemConfigGrid: some View {
+        VStack(spacing: 0) {
+
+            // ── 合盖行为 ─────────────────────────────────────────
+            configSectionHeader(lang.t("合盖行为", "Lid Behavior"))
+            configRow(
+                icon: "laptopcomputer.closed",
+                iconColor: AppTheme.lid.icon,
+                label: lang.t("合上盖子后", "When lid closes"),
+                value: viewModel.lidWillSleep
+                    ? lang.t("进入休眠", "Sleeps")
+                    : lang.t("保持运行", "Stays awake"),
+                valueColor: viewModel.lidWillSleep ? .green : .orange,
+                detail: (
+                    cmd: viewModel.lidWillSleep
+                        ? "pmset -g | grep disablesleep  → 0"
+                        : "pmset -g | grep disablesleep  → 1  /  pgrep caffeinate",
+                    explain: viewModel.lidWillSleep
+                        ? lang.t("disablesleep=0，合盖后 macOS 正常触发休眠流程", "disablesleep=0: macOS sleeps normally on lid close")
+                        : lang.t("disablesleep=1 或 caffeinate 进程阻止了休眠，合盖后系统继续运行", "disablesleep=1 or caffeinate prevents sleep – system stays on")
+                )
+            )
+            configRow(
+                icon: "wifi",
+                iconColor: .blue,
+                label: lang.t("休眠期间网络", "Network while asleep"),
+                value: viewModel.sysNetworkOverSleep == 1
+                    ? lang.t("保持连接", "Stays connected")
+                    : lang.t("断开连接", "Disconnected"),
+                valueColor: viewModel.sysNetworkOverSleep == 1 ? .green : .secondary,
+                detail: (
+                    cmd: "pmset -g | grep networkoversleep  → \(viewModel.sysNetworkOverSleep < 0 ? "?" : "\(viewModel.sysNetworkOverSleep)")",
+                    explain: lang.t("1=休眠时维持网络唤醒（Power Nap），0=完全断网省电", "1=keep network for Power Nap; 0=disconnect to save power")
+                )
+            )
+
+            configDivider()
+
+            // ── 休眠模式 ─────────────────────────────────────────
+            configSectionHeader(lang.t("休眠模式", "Hibernate Mode"))
+            configRow(
+                icon: "sleep",
+                iconColor: AppTheme.powerHibernate.icon,
+                label: lang.t("当前休眠策略", "Active strategy"),
+                value: hibernateModeLabel(viewModel.sysHibernateMode),
+                valueColor: AppTheme.powerHibernate.accent,
+                detail: (
+                    cmd: "pmset -g | grep hibernatemode  → \(viewModel.sysHibernateMode < 0 ? "?" : "\(viewModel.sysHibernateMode)")",
+                    explain: lang.t("0=纯内存（唤醒最快，断电丢失）  3=混合（默认，断电安全）  25=深度（RAM断电，零耗电）",
+                                    "0=RAM only (fastest)  3=Hybrid (default, safe)  25=Deep (RAM off, zero draw)")
+                )
+            )
+            // 深度待机：只有 sleep > 0 时才有意义
+            let standbyEffective = viewModel.sysStandby == 1 && viewModel.sysSystemSleep > 0
+                                   && viewModel.sysSleepBlockers.isEmpty
+            configRow(
+                icon: "moon.stars.fill",
+                iconColor: .gray,
+                label: lang.t("超长待机节电", "Extended standby"),
+                value: standbyEffective
+                    ? lang.t("进入深度待机", "Deep standby")
+                    : (viewModel.sysStandby == 1
+                        ? lang.t("不生效（自动休眠已关闭）", "N/A – auto-sleep is off")
+                        : lang.t("已禁用", "Disabled")),
+                valueColor: standbyEffective ? .green : .secondary,
+                detail: (
+                    cmd: "pmset -g | grep standby  → \(viewModel.sysStandby < 0 ? "?" : "\(viewModel.sysStandby)")",
+                    explain: standbyEffective
+                        ? lang.t("系统休眠后会进一步切断更多硬件供电，电池续航更长", "After sleeping, system cuts more power to extend battery life")
+                        : lang.t("需要先开启自动休眠（系统闲置超时 > 0），超长待机才能生效", "Requires auto-sleep timer > 0 to work – currently sleep is disabled")
+                )
+            )
+
+            configDivider()
+
+            // ── 自动休眠计时器 ────────────────────────────────────
+            configSectionHeader(lang.t("自动休眠计时器", "Auto-sleep Timers"))
+
+            // 系统休眠行 — 区分"配置为0"和"被进程阻止"
+            let sleepBlocked = !viewModel.sysSleepBlockers.isEmpty
+            let sleepVal = viewModel.sysSystemSleep
+            configRow(
+                icon: "moon.zzz.fill",
+                iconColor: AppTheme.sleep.icon,
+                label: lang.t("系统闲置后休眠", "System sleeps after"),
+                value: sleepBlocked
+                    ? lang.t("被 \(viewModel.sysSleepBlockers.joined(separator: "、")) 阻止",
+                              "Blocked by \(viewModel.sysSleepBlockers.joined(separator: ", "))")
+                    : (sleepVal == 0
+                        ? lang.t("已关闭", "Off")
+                        : lang.t("\(sleepVal) 分钟后", "After \(sleepVal) min")),
+                valueColor: sleepBlocked ? .orange : (sleepVal == 0 ? .secondary : .primary),
+                detail: (
+                    cmd: "pmset -g | grep '^ sleep'  → \(sleepVal < 0 ? "?" : "\(sleepVal)")\(sleepBlocked ? " (prevented)" : "")",
+                    explain: sleepBlocked
+                        ? lang.t("计时器本身可能有效，但当前有程序（如 caffeinate）持有『阻止睡眠断言』，系统不会自动进入休眠", "Timer may be set, but a process holds a sleep-prevention assertion (e.g. caffeinate)")
+                        : (sleepVal == 0
+                            ? lang.t("sleep=0 表示关闭了自动休眠计时器，系统永远不会因为闲置而自动休眠", "sleep=0: auto-sleep timer disabled; system never sleeps on its own")
+                            : lang.t("系统闲置 \(sleepVal) 分钟后自动进入休眠", "System auto-sleeps after \(sleepVal) min of inactivity"))
+                )
+            )
+
+            // 显示器关闭行
+            let dispBlocked = !viewModel.sysDisplaySleepBlockers.isEmpty
+            let dispVal = viewModel.sysDisplaySleep
+            configRow(
+                icon: "display",
+                iconColor: .cyan,
+                label: lang.t("显示器闲置后关闭", "Display turns off after"),
+                value: dispBlocked
+                    ? lang.t("被 \(viewModel.sysDisplaySleepBlockers.joined(separator: "、")) 阻止",
+                              "Blocked by \(viewModel.sysDisplaySleepBlockers.joined(separator: ", "))")
+                    : (dispVal == 0
+                        ? lang.t("已关闭", "Off")
+                        : lang.t("\(dispVal) 分钟后", "After \(dispVal) min")),
+                valueColor: dispBlocked ? .orange : (dispVal == 0 ? .secondary : .primary),
+                detail: (
+                    cmd: "pmset -g | grep displaysleep  → \(dispVal < 0 ? "?" : "\(dispVal)")\(dispBlocked ? " (prevented)" : "")",
+                    explain: dispBlocked
+                        ? lang.t("有程序阻止显示器关闭（如全屏播放、caffeinate -d）", "A process is preventing display sleep (e.g. fullscreen video, caffeinate -d)")
+                        : (dispVal == 0
+                            ? lang.t("displaysleep=0，显示器永远不会自动关闭", "displaysleep=0: display never turns off automatically")
+                            : lang.t("显示器闲置 \(dispVal) 分钟后自动关闭", "Display turns off after \(dispVal) min of inactivity"))
+                )
+            )
+
+            // 磁盘休眠行
+            let diskVal = viewModel.sysDiskSleep
+            configRow(
+                icon: "internaldrive.fill",
+                iconColor: AppTheme.disk.icon,
+                label: lang.t("磁盘闲置后休眠", "Disk sleeps after"),
+                value: diskVal == 0
+                    ? lang.t("已关闭", "Off")
+                    : lang.t("\(diskVal) 分钟后", "After \(diskVal) min"),
+                valueColor: diskVal == 0 ? .secondary : .primary,
+                detail: (
+                    cmd: "pmset -g | grep disksleep  → \(diskVal < 0 ? "?" : "\(diskVal)")",
+                    explain: diskVal == 0
+                        ? lang.t("disksleep=0，磁盘不会因闲置自动休眠，适合外接硬盘或频繁读写场景", "disksleep=0: disk never spins down; good for external drives or frequent I/O")
+                        : lang.t("磁盘闲置 \(diskVal) 分钟后自动停转以节省电量", "Disk spins down after \(diskVal) min to save power")
+                )
+            )
+        }
+        .padding(.horizontal, 4)
+        .background(AppTheme.cardBackground,
+                    in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
+    }
+
+    // ── 辅助视图组件 ────────────────────────────────────────────
+
+    private func configSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+    }
+
+    /// detail: (命令示例, 状态解读)，非 nil 时显示可展开的灰色说明栏
+    private func configRow(
+        icon: String, iconColor: Color,
+        label: String, value: String, valueColor: Color,
+        detail: (cmd: String, explain: String)? = nil
+    ) -> some View {
+        ConfigRowView(
+            icon: icon, iconColor: iconColor,
+            label: label, value: value, valueColor: valueColor,
+            detail: detail
+        )
+    }
+
+    private func configDivider() -> some View {
+        Divider()
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+    }
+
+    // ── 辅助格式化函数 ─────────────────────────────────────────
+
+    private func idleTimeLabel(_ val: Int) -> String {
+        guard val >= 0 else { return "—" }
+        if val == 0 { return lang.t("从不自动休眠", "Never") }
+        if val == 1 { return lang.t("1 分钟后", "After 1 min") }
+        return lang.t("\(val) 分钟后", "After \(val) min")
+    }
+
+    private func hibernateModeLabel(_ val: Int) -> String {
+        switch val {
+        case 0:  return lang.t("纯内存 (0)", "RAM only (0)")
+        case 3:  return lang.t("混合 (3)", "Hybrid (3)")
+        case 25: return lang.t("深度 (25)", "Deep (25)")
+        default: return val >= 0 ? "\(val)" : "—"
         }
     }
 
@@ -567,6 +749,79 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Config Row View（可展开说明的配置行）
+
+struct ConfigRowView: View {
+    let icon: String
+    let iconColor: Color
+    let label: String
+    let value: String
+    let valueColor: Color
+    let detail: (cmd: String, explain: String)?
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 主行
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 16, alignment: .center)
+                Text(label)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(value)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(valueColor)
+                // 展开箭头（仅当有 detail 时显示）
+                if detail != nil {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.18), value: expanded)
+                        .padding(.leading, 2)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if detail != nil {
+                    withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() }
+                }
+            }
+
+            // 展开的说明栏
+            if expanded, let d = detail {
+                VStack(alignment: .leading, spacing: 4) {
+                    // 指令行
+                    HStack(spacing: 4) {
+                        Image(systemName: "terminal.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                        Text(d.cmd)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    // 解读行
+                    Text(d.explain)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 7)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
 // MARK: - Setting Card（通用设置卡片组件）
 // 包含：图标 + 标题 + 状态徽标 + 可选的「应用」按钮 + 自定义内容区域。
 
@@ -576,12 +831,15 @@ struct SettingCard<Content: View>: View {
     let title: String
     let status: ActionStatus
     var showApplyButton: Bool = true
+    var isCollapsible: Bool = false
+    var collapsedSummary: String? = nil   // 折叠时在标题旁显示的摘要文字
     @ViewBuilder let content: () -> Content
     let applyAction: () async -> Void
     @EnvironmentObject private var lang: LanguageManager
+    @State private var collapsed: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: collapsed ? 0 : 10) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 13, weight: .semibold))
@@ -589,12 +847,36 @@ struct SettingCard<Content: View>: View {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
+                // 折叠时显示摘要胶囊
+                if collapsed, let summary = collapsedSummary {
+                    Text(summary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(iconColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(iconColor.opacity(0.1), in: Capsule())
+                        .transition(.opacity)
+                }
                 statusBadge
+                if isCollapsible {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
+                    }) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    }
+                    .buttonStyle(.plain)
+                }
                 if showApplyButton {
                     applyActionButton
                 }
             }
-            content()
+            if !collapsed {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(AppTheme.cardPadding)
         .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
