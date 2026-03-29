@@ -419,6 +419,29 @@ struct ContentView: View {
 
             configDivider()
 
+            // ── 电源键行为 ────────────────────────────────────────
+            configSectionHeader(lang.t("电源键行为", "Power Button"))
+            let pbDisplaySleep = viewModel.powerButtonMode == .displaySleep
+            configRow(
+                icon: "power",
+                iconColor: AppTheme.powerButton.icon,
+                label: lang.t("短按电源键", "Short press"),
+                value: pbDisplaySleep
+                    ? lang.t("关闭屏幕", "Display off")
+                    : lang.t("系统睡眠", "System sleep"),
+                valueColor: pbDisplaySleep ? .cyan : .secondary,
+                detail: (
+                    cmd: pbDisplaySleep
+                        ? "defaults read com.apple.loginwindow PowerButtonSleepsSystem  → 0"
+                        : "defaults read com.apple.loginwindow PowerButtonSleepsSystem  → 1（默认）",
+                    explain: pbDisplaySleep
+                        ? lang.t("PowerButtonSleepsSystem=NO，短按只灭屏，系统继续运行，适合外接显示器场景", "PowerButtonSleepsSystem=NO: press turns off display only; system keeps running")
+                        : lang.t("macOS 默认行为，短按电源键触发系统睡眠", "Default macOS behavior: short press puts the system to sleep")
+                )
+            )
+
+            configDivider()
+
             // ── 休眠模式 ─────────────────────────────────────────
             configSectionHeader(lang.t("休眠模式", "Hibernate Mode"))
             configRow(
