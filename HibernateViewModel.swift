@@ -86,6 +86,7 @@ final class HibernateViewModel: ObservableObject {
     @Published var powerButtonMode: PowerButtonMode = .systemSleep
     @Published var powerButtonStatus: ActionStatus = .idle
     @Published var hibernateNowStatus: ActionStatus = .idle
+    @Published var sleepNowStatus: ActionStatus = .idle
 
     // MARK: Status
     @Published var sleepStatus: ActionStatus = .idle
@@ -393,6 +394,34 @@ final class HibernateViewModel: ObservableObject {
             refreshPmsetInfo()
         } catch {
             hibernateNowStatus = .error(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Sleep Now（立即进入睡眠）
+
+    /// 立即让系统进入睡眠，使用系统当前已有的 hibernatemode，不修改任何 pmset 参数。
+    /// 操作前暂停 caffeinate（否则它持有的断言会阻止 pmset sleepnow），
+    /// 唤醒后系统恢复正常，caffeinate 不会自动重启（如需持续"合盖不休眠"请重新应用合盖设置）。
+    func sleepNow() async {
+        sleepNowStatus = .applying
+        do {
+            // Step 1: 解除 disablesleep（旧版本可能遗留 disablesleep=1，会彻底拦截 sleepnow）
+            try await ShellHelper.runWithAdmin("pmset -a disablesleep 0")
+
+            // Step 2: 停掉 caffeinate（否则其睡眠阻止断言会拦截 sleepnow）
+            if caffeinateRunning {
+                caffeinateProcess?.terminate()
+                caffeinateProcess = nil
+                _ = ShellHelper.run("pkill -f caffeinate 2>/dev/null")
+                caffeinateRunning = false
+            }
+
+            // Step 3: 触发睡眠
+            _ = ShellHelper.run("pmset sleepnow")
+            sleepNowStatus = .applied
+            refreshPmsetInfo()
+        } catch {
+            sleepNowStatus = .error(error.localizedDescription)
         }
     }
 

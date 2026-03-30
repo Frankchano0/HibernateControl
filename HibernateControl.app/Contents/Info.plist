@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.frankyz.hibernatecontrol</string>
     <key>CFBundleVersion</key>
-    <string>1.0</string>
+    <string>5.3</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>5.3</string>
     <key>CFBundleExecutable</key>
     <string>HibernateControl</string>
     <key>CFBundlePackageType</key>
@@ -20,6 +20,8 @@
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>HibernateControl 需要辅助功能权限以支持全局快捷键 ⌥⌘S 触发立即休眠。</string>
     <key>NSAppleScriptEnabled</key>
     <true/>
     <key>CFBundleIconFile</key>

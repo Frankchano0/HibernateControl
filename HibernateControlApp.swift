@@ -1,35 +1,68 @@
 import SwiftUI
 import AppKit
+import Carbon
 
 // MARK: - App Delegate
 // 左键点击状态栏图标 → 弹出操作面板
 // 右键点击状态栏图标 → 弹出菜单（切换语言 / 退出）
+// 全局快捷键 ⌥⌘S → 立即休眠
 
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let langManager = LanguageManager.shared
+    private var viewModel: HibernateViewModel!
+    private var globalHotKeyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        viewModel = HibernateViewModel()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
             button.image = makeStatusBarIcon()
-            button.image?.isTemplate = true   // 自动适配深/浅色菜单栏
+            button.image?.isTemplate = true
             button.action = #selector(handleClick)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.target = self
         }
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 400, height: 100) // 初始高度，会由内容自适应
+        popover.contentSize = NSSize(width: 400, height: 100)
         popover.behavior = .transient
         let hostingController = NSHostingController(
-            rootView: ContentView().environmentObject(langManager)
+            rootView: ContentView(viewModel: viewModel).environmentObject(langManager)
         )
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         popover.contentViewController = hostingController
         popover.animates = true
+
+        registerGlobalHotKey()
+    }
+
+    /// 注册全局快捷键：
+    /// - ⌥⌘S → 立即休眠
+    /// - ⌥⌘L → 关闭屏幕
+    private func registerGlobalHotKey() {
+        let trusted = AXIsProcessTrustedWithOptions(
+            [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        )
+        guard trusted else { return }
+
+        globalHotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let isOptCmd = event.modifierFlags.contains(.option) && event.modifierFlags.contains(.command)
+            guard isOptCmd else { return }
+
+            switch event.keyCode {
+            case 1:  // S → 立即休眠
+                Task { @MainActor in await self?.viewModel.sleepNow() }
+            case 37: // L → 关闭屏幕
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+                p.arguments = ["displaysleepnow"]
+                try? p.run()
+            default: break
+            }
+        }
     }
 
     @objc func handleClick() {
@@ -63,6 +96,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextMenu() {
         let menu = NSMenu()
 
+        // 立即休眠
+        let sleepTitle = langManager.isEnglish ? "Sleep Now  ⌥⌘S" : "立即休眠  ⌥⌘S"
+        let sleepItem = NSMenuItem(title: sleepTitle, action: #selector(sleepNow), keyEquivalent: "")
+        sleepItem.target = self
+        menu.addItem(sleepItem)
+
+        // 关闭屏幕
+        let displayTitle = langManager.isEnglish ? "Display Off  ⌥⌘L" : "关闭屏幕  ⌥⌘L"
+        let displayItem = NSMenuItem(title: displayTitle, action: #selector(displaySleepNow), keyEquivalent: "")
+        displayItem.target = self
+        menu.addItem(displayItem)
+
+        menu.addItem(.separator())
+
         // 语言切换
         let langTitle = langManager.isEnglish ? "切换为中文" : "Switch to English"
         let langItem = NSMenuItem(title: langTitle, action: #selector(toggleLanguage), keyEquivalent: "")
@@ -79,7 +126,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
-        statusItem.menu = nil  // 用完即清，避免影响左键行为
+        statusItem.menu = nil
+    }
+
+    @objc private func sleepNow() {
+        Task { await viewModel.sleepNow() }
+    }
+
+    @objc private func displaySleepNow() {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        p.arguments = ["displaysleepnow"]
+        try? p.run()
     }
 
     /// 用代码绘制状态栏图标：月牙 + 暂停竖条（isTemplate=true，自动适配深/浅色）
@@ -130,15 +188,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }
 
-    @objc private func toggleLanguage() {        langManager.isEnglish.toggle()
-        // 切换语言后刷新 popover 内容
+    @objc private func toggleLanguage() {
+        langManager.isEnglish.toggle()
         popover.contentViewController = NSHostingController(
-            rootView: ContentView().environmentObject(langManager)
+            rootView: ContentView(viewModel: viewModel).environmentObject(langManager)
         )
     }
 
     @objc private func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = globalHotKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        task.arguments = ["-f", "caffeinate"]
+        try? task.run()
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import ApplicationServices
 
 // MARK: - Theme（主题配置）
 // 统一管理应用中所有 UI 元素的颜色、间距、圆角等视觉参数，
@@ -39,7 +40,7 @@ enum AppTheme {
 // 3. 底部"全部应用"操作栏 (applyAllBar)
 
 struct ContentView: View {
-    @StateObject private var viewModel = HibernateViewModel()
+    @ObservedObject var viewModel: HibernateViewModel
     @EnvironmentObject private var lang: LanguageManager
     @State private var showPmsetInfo = false
 
@@ -191,12 +192,22 @@ struct ContentView: View {
     // MARK: - Power Button Card（电源键行为设置卡片）
     // 短按电源键行为配置 + 立即深度休眠按钮
 
+    private var powerButtonModeSummary: String {
+        switch viewModel.powerButtonMode {
+        case .displaySleep: return lang.t("关闭屏幕", "Display Off")
+        case .systemSleep:  return lang.t("进入睡眠", "Sleep")
+        }
+    }
+
     private var powerButtonCard: some View {
         SettingCard(
             icon: "power",
             iconColor: AppTheme.powerButton.icon,
             title: lang.t("电源键行为", "Power Button"),
-            status: viewModel.powerButtonStatus
+            status: viewModel.powerButtonStatus,
+            isCollapsible: true,
+            collapsedSummary: powerButtonModeSummary,
+            alwaysShowSummary: true
         ) {
             VStack(spacing: 10) {
                 modePicker(
@@ -220,6 +231,77 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Sleep Now Bar（顶部立即休眠栏）
+
+    private var sleepNowBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.indigo)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(lang.t("立即休眠", "Sleep Now"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(lang.t("快捷键：⌥⌘S", "Shortcut: ⌥⌘S"))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: {
+                    Task { await viewModel.sleepNow() }
+                }) {
+                    HStack(spacing: 4) {
+                        if viewModel.sleepNowStatus.isApplying {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "moon.zzz.fill")
+                                .font(.system(size: 11))
+                        }
+                        Text(lang.t("休眠", "Sleep"))
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .controlSize(.small)
+                .disabled(viewModel.sleepNowStatus.isApplying)
+            }
+            .padding(.horizontal, 4)
+
+            // 辅助功能权限提示
+            if !AXIsProcessTrusted() {
+                Button(action: {
+                    AXIsProcessTrustedWithOptions(
+                        [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+                    )
+                }) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                        Text(lang.t("点击授权辅助功能权限以启用快捷键", "Tap to grant Accessibility permission for shortcut"))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(AppTheme.cardPadding)
+        .background(AppTheme.cardBackground, in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
+    }
+
     // MARK: - Hibernate Mode Card（休眠模式 — 可折叠 + 说明框含执行按钮）
 
     private var hibernateModeSummary: String {
@@ -237,7 +319,8 @@ struct ContentView: View {
             title: lang.t("休眠模式", "Hibernate Mode"),
             status: viewModel.hibernateModeStatus,
             isCollapsible: true,
-            collapsedSummary: hibernateModeSummary
+            collapsedSummary: hibernateModeSummary,
+            alwaysShowSummary: true
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.hibernateMode, options: [
@@ -582,6 +665,27 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Divider()
             HStack(spacing: 12) {
+                // 立即休眠按钮（左侧）
+                Button(action: {
+                    Task { await viewModel.sleepNow() }
+                }) {
+                    HStack(spacing: 5) {
+                        if viewModel.sleepNowStatus.isApplying {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "moon.zzz.fill")
+                                .font(.system(size: 13))
+                        }
+                        Text(lang.t("休眠", "Sleep"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .disabled(viewModel.sleepNowStatus.isApplying)
+
                 applyAllStatusView
                 Spacer()
 
@@ -828,6 +932,7 @@ struct SettingCard<Content: View>: View {
     var showApplyButton: Bool = true
     var isCollapsible: Bool = false
     var collapsedSummary: String? = nil   // 折叠时在标题旁显示的摘要文字
+    var alwaysShowSummary: Bool = false   // true = 展开时标题行也常驻显示摘要
     @ViewBuilder let content: () -> Content
     let applyAction: () async -> Void
     @EnvironmentObject private var lang: LanguageManager
@@ -842,8 +947,8 @@ struct SettingCard<Content: View>: View {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                // 折叠时显示摘要胶囊
-                if collapsed, let summary = collapsedSummary {
+                // 折叠时显示摘要胶囊（或 alwaysShowSummary=true 时始终显示）
+                if (collapsed || alwaysShowSummary), let summary = collapsedSummary {
                     Text(summary)
                         .font(.system(size: 11))
                         .foregroundStyle(iconColor)
