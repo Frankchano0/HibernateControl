@@ -69,7 +69,22 @@ struct ShellHelper {
     static func launchCaffeinate() throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = ["-dimsu"]  // 全面防止睡眠
+        let appPID = String(ProcessInfo.processInfo.processIdentifier)
+        process.arguments = ["-dimsu", "-w", appPID]  // 仅跟随本 App 生命周期防睡眠
+        try process.run()
+        return process
+    }
+
+    /// 启动 caffeinate（不阻止系统睡眠）。
+    /// 使用 -dimu 标志：防止空闲/显示器/磁盘睡眠 + 模拟用户活跃，
+    /// 但不持有 PreventSystemSleep assertion，允许电源键/pmset sleepnow 触发睡眠。
+    /// 配合 disablesleep=1 使用：disablesleep 阻止合盖睡眠，caffeinate 阻止空闲睡眠，
+    /// 而电源键路径畅通。
+    static func launchCaffeinateLight() throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        let appPID = String(ProcessInfo.processInfo.processIdentifier)
+        process.arguments = ["-dimu", "-w", appPID]  // 不含 -s，允许电源键触发系统睡眠
         try process.run()
         return process
     }

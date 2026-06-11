@@ -14,6 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let langManager = LanguageManager.shared
     private var viewModel: HibernateViewModel!
     private var globalHotKeyMonitor: Any?
+    private var blinkTimer: Timer?
+    private var blinkPhase = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         viewModel = HibernateViewModel()
@@ -55,11 +57,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             switch event.keyCode {
             case 1:  // S → 立即休眠
                 Task { @MainActor in await self?.viewModel.sleepNow() }
-            case 37: // L → 关闭屏幕
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-                p.arguments = ["displaysleepnow"]
-                try? p.run()
+            case 37: // L → 立即锁屏
+                self?.lockScreenNow()
+            case 17: // T → 切换触控板清洁
+                if TrackpadCleaner.shared.isActive {
+                    TrackpadCleaner.shared.stop()
+                } else {
+                    TrackpadCleaner.shared.start()
+                }
             default: break
             }
         }
@@ -68,9 +73,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func handleClick() {
         guard let event = NSApp.currentEvent else { return }
         if event.type == .rightMouseUp {
+            // 右键：始终弹出菜单（含 "✓ 键盘清洁中" 状态）
             showContextMenu()
         } else {
-            togglePopover()
+            // 左键：激活时点击即解锁；否则打开面板
+            if KeyboardCleaner.shared.isActive {
+                KeyboardCleaner.shared.stop()
+                stopBlinkAnimation()
+            } else {
+                togglePopover()
+            }
         }
     }
 
@@ -96,29 +108,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextMenu() {
         let menu = NSMenu()
 
-        // 立即休眠
-        let sleepTitle = langManager.isEnglish ? "Sleep Now  ⌥⌘S" : "立即休眠  ⌥⌘S"
+        addMenuSection(langManager.isEnglish ? "Power" : "电源", to: menu)
+
+        let sleepTitle = langManager.isEnglish ? "Sleep Now  ⌥⌘S" : "立即睡眠  ⌥⌘S"
         let sleepItem = NSMenuItem(title: sleepTitle, action: #selector(sleepNow), keyEquivalent: "")
         sleepItem.target = self
         menu.addItem(sleepItem)
 
-        // 关闭屏幕
-        let displayTitle = langManager.isEnglish ? "Display Off  ⌥⌘L" : "关闭屏幕  ⌥⌘L"
+        let bagTitle = langManager.isEnglish ? "Put in Bag (No Wake)" : "放入书包（关闭唤醒源）"
+        let bagItem = NSMenuItem(title: bagTitle, action: #selector(sleepNoWake), keyEquivalent: "")
+        bagItem.target = self
+        menu.addItem(bagItem)
+
+        let lockTitle = langManager.isEnglish ? "Lock Screen  ⌥⌘L" : "立即锁屏  ⌥⌘L"
+        let lockItem = NSMenuItem(title: lockTitle, action: #selector(lockScreenNow), keyEquivalent: "")
+        lockItem.target = self
+        menu.addItem(lockItem)
+
+        let displayTitle = langManager.isEnglish ? "Display Off" : "关闭屏幕"
         let displayItem = NSMenuItem(title: displayTitle, action: #selector(displaySleepNow), keyEquivalent: "")
         displayItem.target = self
         menu.addItem(displayItem)
 
         menu.addItem(.separator())
+        addMenuSection(langManager.isEnglish ? "Cleaning" : "清洁", to: menu)
 
-        // 语言切换
+        let cleanTitle: String
+        if langManager.isEnglish {
+            cleanTitle = KeyboardCleaner.shared.isActive ? "✓ Keyboard Clean" : "Keyboard Clean"
+        } else {
+            cleanTitle = KeyboardCleaner.shared.isActive ? "✓ 键盘清洁中" : "键盘清洁"
+        }
+        let cleanItem = NSMenuItem(title: cleanTitle, action: #selector(toggleKeyboardClean), keyEquivalent: "")
+        cleanItem.target = self
+        menu.addItem(cleanItem)
+
+        let trackpadTitle: String
+        if langManager.isEnglish {
+            trackpadTitle = TrackpadCleaner.shared.isActive ? "✓ Trackpad Clean  ⌥⌘T" : "Trackpad Clean  ⌥⌘T"
+        } else {
+            trackpadTitle = TrackpadCleaner.shared.isActive ? "✓ 触控板清洁中  ⌥⌘T" : "触控板清洁  ⌥⌘T"
+        }
+        let trackpadItem = NSMenuItem(title: trackpadTitle, action: #selector(toggleTrackpadClean), keyEquivalent: "")
+        trackpadItem.target = self
+        menu.addItem(trackpadItem)
+
+        menu.addItem(.separator())
+        addMenuSection(langManager.isEnglish ? "App" : "应用", to: menu)
+
         let langTitle = langManager.isEnglish ? "切换为中文" : "Switch to English"
         let langItem = NSMenuItem(title: langTitle, action: #selector(toggleLanguage), keyEquivalent: "")
         langItem.target = self
         menu.addItem(langItem)
 
-        menu.addItem(.separator())
-
-        // 退出
         let quitTitle = langManager.isEnglish ? "Quit" : "退出"
         let quitItem = NSMenuItem(title: quitTitle, action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -129,8 +171,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil
     }
 
+    private func addMenuSection(_ title: String, to menu: NSMenu) {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        menu.addItem(item)
+    }
+
     @objc private func sleepNow() {
         Task { await viewModel.sleepNow() }
+    }
+
+    @objc private func sleepNoWake() {
+        Task { await viewModel.sleepNoWake() }
     }
 
     @objc private func displaySleepNow() {
@@ -138,6 +190,70 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         p.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
         p.arguments = ["displaysleepnow"]
         try? p.run()
+    }
+
+    @objc private func lockScreenNow() {
+        // 使用系统 API 触发锁屏（等同于 Ctrl+Cmd+Q）
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "tell application \"System Events\" to keystroke \"q\" using {control down, command down}"]
+        try? p.run()
+    }
+
+    @objc private func toggleKeyboardClean() {
+        if KeyboardCleaner.shared.isActive {
+            KeyboardCleaner.shared.stop()
+            stopBlinkAnimation()
+        } else {
+            KeyboardCleaner.shared.start()
+            if KeyboardCleaner.shared.isActive {
+                startBlinkAnimation()
+            }
+        }
+    }
+
+    @objc private func toggleTrackpadClean() {
+        if TrackpadCleaner.shared.isActive {
+            TrackpadCleaner.shared.stop()
+        } else {
+            TrackpadCleaner.shared.start()
+        }
+    }
+
+    /// 开始闪烁动效：月亮图标 ↔ 锁图标，每 0.8s 切换一次
+    private func startBlinkAnimation() {
+        blinkPhase = false
+        blinkTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.blinkPhase.toggle()
+            if self.blinkPhase {
+                self.statusItem.button?.image = self.makeCleanActiveIcon()
+            } else {
+                self.statusItem.button?.image = self.makeStatusBarIcon()
+            }
+        }
+        // 立即显示激活图标
+        statusItem.button?.image = makeCleanActiveIcon()
+    }
+
+    private func stopBlinkAnimation() {
+        blinkTimer?.invalidate()
+        blinkTimer = nil
+        statusItem.button?.image = makeStatusBarIcon()
+    }
+
+    /// 键盘清洁激活图标：月牙 + 锁形（使用 SF Symbol lock.fill，isTemplate 自动适配深/浅色）
+    private func makeCleanActiveIcon() -> NSImage {
+        if let sf = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil) {
+            let sized = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+                sf.draw(in: rect)
+                return true
+            }
+            sized.isTemplate = true
+            return sized
+        }
+        // fallback：画一个简单的小锁轮廓
+        return makeStatusBarIcon()
     }
 
     /// 用代码绘制状态栏图标：月牙 + 暂停竖条（isTemplate=true，自动适配深/浅色）
@@ -185,6 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             return true
         }
+        image.isTemplate = true
         return image
     }
 
@@ -200,13 +317,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        KeyboardCleaner.shared.stop()  // 确保退出时键盘解锁
+        TrackpadCleaner.shared.stop()  // 确保退出时触控板解锁
+        stopBlinkAnimation()
         if let monitor = globalHotKeyMonitor {
             NSEvent.removeMonitor(monitor)
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-f", "caffeinate"]
-        try? task.run()
+        // caffeinate 由 ViewModel 持有并带 -w 绑定本 App 生命周期，退出时不再 broad-kill。
+        // 如果当前是合盖睡眠模式，确保 disablesleep=0（允许系统正常睡眠）
+        if viewModel.lidMode == .sleepOnLidClose {
+            let restore = Process()
+            restore.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+            restore.arguments = ["-a", "disablesleep", "0"]
+            try? restore.run()
+        }
     }
 }
 

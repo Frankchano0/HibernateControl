@@ -75,6 +75,13 @@ final class HibernateViewModel: ObservableObject {
     /// 磁盘空闲后的休眠超时分钟数（仅在 custom 模式下生效）
     @Published var diskSleepMinutes: Int = 10
 
+    // MARK: Display Lock（自动锁屏设置）
+    /// 当前选择的锁屏模式（永不锁屏 / 自定义）
+    @Published var displayLockMode: SleepMode = .neverSleep
+    /// 锁屏超时分钟数
+    @Published var displayLockMinutes: Int = 5
+    @Published var displayLockStatus: ActionStatus = .idle
+
     // MARK: Lid Mode
     @Published var lidMode: LidMode = .sleepOnLidClose
 
@@ -83,10 +90,20 @@ final class HibernateViewModel: ObservableObject {
 
     // MARK: Power Button（电源键行为）
     /// 短按电源键行为：关闭屏幕 / 进入睡眠
-    @Published var powerButtonMode: PowerButtonMode = .systemSleep
+    /// 联动规则：切换电源键模式时，若合盖不睡眠 active，重新 apply caffeinate flags
+    @Published var powerButtonMode: PowerButtonMode = .systemSleep {
+        didSet {
+            guard !isLoadingSettings else { return }
+            // 合盖不睡眠时，电源键模式变化需要切换 caffeinate 变体（-dimsu vs -dimu）
+            if lidMode == .noSleepOnLidClose && !lidStatus.isApplying {
+                Task { await applyLidMode() }
+            }
+        }
+    }
     @Published var powerButtonStatus: ActionStatus = .idle
     @Published var hibernateNowStatus: ActionStatus = .idle
     @Published var sleepNowStatus: ActionStatus = .idle
+    @Published var sleepNoWakeStatus: ActionStatus = .idle
 
     // MARK: Status
     @Published var sleepStatus: ActionStatus = .idle
@@ -112,10 +129,14 @@ final class HibernateViewModel: ObservableObject {
     /// sleep/displaysleep 被哪些进程阻止（空 = 未被阻止）
     @Published var sysSleepBlockers: [String] = []
     @Published var sysDisplaySleepBlockers: [String] = []
+    @Published var sysAssertionBlockers: [String] = []
 
     // MARK: Internal（内部状态）
     /// caffeinate 子进程引用，用于在"合盖不睡眠"模式下保持系统唤醒。
     private var caffeinateProcess: Process?
+
+    /// 加载系统设置时抑制 didSet 联动逻辑
+    private var isLoadingSettings = false
 
     /// 缓存的 caffeinate 运行状态（由 refreshPmsetInfo 更新，避免在 view body 中同步执行 shell）
     @Published var caffeinateRunning: Bool = false
@@ -128,12 +149,35 @@ final class HibernateViewModel: ObservableObject {
     init() {
         refreshPmsetInfo()  // 启动时立即读取当前系统电源设置
         loadCurrentSettings()  // 从系统读取当前值，同步到 UI
+        cleanupOrphanCaffeinate()  // 启动时清理与当前设置矛盾的孤儿进程
+    }
+
+    // MARK: - Orphan Cleanup（启动时安全检查）
+
+    /// 启动时检查：如果当前设置是「合盖睡眠」，但系统中仍有 caffeinate 进程在跑，
+    /// 说明上次 App 异常退出遗留了孤儿进程。主动清理，防止合盖后不睡眠。
+    /// 同理：如果 disablesleep=1 但 lidMode=sleepOnLidClose，也需要恢复。
+    private func cleanupOrphanCaffeinate() {
+        if lidMode == .sleepOnLidClose {
+            // 合盖睡眠模式下只终止本 App 当前持有的 caffeinate，不处理用户或其他 App 的 caffeinate。
+            stopCaffeinate()
+            // disablesleep 也不应为 1
+            let raw = ShellHelper.run("pmset -g")
+            if raw.contains("disablesleep") && raw.range(of: #"disablesleep\s+1"#, options: .regularExpression) != nil {
+                Task {
+                    try? await ShellHelper.runWithAdmin("pmset -a disablesleep 0")
+                    refreshPmsetInfo()
+                }
+            }
+        }
     }
 
     // MARK: - Load Current Settings（从系统读取当前设置同步到 UI）
 
     /// 读取 pmset -g 的实际值，将系统当前状态反映到各 UI 控件。
     func loadCurrentSettings() {
+        isLoadingSettings = true
+        defer { isLoadingSettings = false }
         let raw = ShellHelper.run("pmset -g")
 
         // 解析某个 key 对应的整数值，例如 "sleep 10" → 10
@@ -164,9 +208,18 @@ final class HibernateViewModel: ObservableObject {
             diskSleepMinutes = diskVal
         }
 
-        // --- 合盖行为（disablesleep=1 明确禁用，或检测到 caffeinate 在跑）
+        // --- 自动锁屏 ---
+        let dispVal = intVal("displaysleep") ?? 0
+        if dispVal == 0 {
+            displayLockMode = .neverSleep
+        } else {
+            displayLockMode = .custom
+            displayLockMinutes = dispVal
+        }
+
+        // --- 合盖行为（disablesleep=1 明确禁用，或检测到 App 自己的 caffeinate 在跑）
         let disableSleep = intVal("disablesleep") ?? 0
-        let caffRunning = !ShellHelper.run("pgrep caffeinate 2>/dev/null").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let caffRunning = isManagedCaffeinateRunning
         lidMode = (disableSleep == 1 || caffRunning) ? .noSleepOnLidClose : .sleepOnLidClose
 
         // --- 休眠模式
@@ -203,9 +256,9 @@ final class HibernateViewModel: ObservableObject {
             guard let paren = matched.range(of: "prevented by ") else { return [] }
             let tail = String(matched[paren.upperBound...])
                 .replacingOccurrences(of: ")", with: "")
-            // 去重，过滤掉 powerd/sharingd 这些系统守护进程，只留用户关心的
+            // 去重，过滤掉系统守护进程和临时 assertion，只留用户关心的持久阻止
             let all = tail.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            let userFacing = all.filter { !["powerd", "sharingd", "runningboardd"].contains($0) }
+            let userFacing = all.filter { !["powerd", "sharingd", "runningboardd", "bluetoothd", "caffeinate", "useractivityd"].contains($0) }
             return Array(Set(userFacing)).sorted()
         }
 
@@ -220,9 +273,9 @@ final class HibernateViewModel: ObservableObject {
         sysDisableSleep     = intVal("disablesleep")
         sysSleepBlockers        = blockers(for: "sleep")
         sysDisplaySleepBlockers = blockers(for: "displaysleep")
+        sysAssertionBlockers    = collectSleepAssertionBlockers()
 
-        caffeinateRunning = !ShellHelper.run("pgrep caffeinate 2>/dev/null")
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        caffeinateRunning = isManagedCaffeinateRunning
     }
 
     // MARK: - Apply Sleep Mode（应用睡眠设置）
@@ -268,12 +321,32 @@ final class HibernateViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Apply Display Lock（应用自动锁屏设置）
+
+    /// 通过 pmset 命令设置屏幕关闭计时器（关屏后自动锁定）。
+    func applyDisplayLock() async {
+        displayLockStatus = .applying
+        do {
+            switch displayLockMode {
+            case .neverSleep:
+                try await ShellHelper.runWithAdmin("pmset -a displaysleep 0")
+            case .custom:
+                try await ShellHelper.runWithAdmin("pmset -a displaysleep \(displayLockMinutes)")
+            }
+            displayLockStatus = .applied
+            refreshPmsetInfo()
+        } catch {
+            displayLockStatus = .error(error.localizedDescription)
+        }
+    }
+
     // MARK: - Apply Lid Mode
 
     /// 合盖行为联动休眠模式：
-    /// - 合盖不休眠 + deepHibernate → disablesleep=0 + caffeinate（保留电源键路径）
-    /// - 合盖不休眠 + 其他           → disablesleep=1 + caffeinate（全封）
-    /// - 合盖休眠                    → 恢复默认
+    /// - 合盖不睡眠 + deepHibernate → disablesleep=0 + caffeinate（保留电源键路径）
+    /// - 合盖不睡眠 + 电源键睡眠   → disablesleep=1 + caffeinateLight（无-s，电源键可用）
+    /// - 合盖不睡眠 + 电源键关屏   → disablesleep=1 + caffeinate（含-s，全封）
+    /// - 合盖睡眠                  → 恢复默认
     func applyLidMode() async {
         lidStatus = .applying
         do {
@@ -286,14 +359,13 @@ final class HibernateViewModel: ObservableObject {
                     "pmset -a networkoversleep 0",
                 ].joined(separator: "; ")
                 try await ShellHelper.runWithAdmin(cmd)
-                _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
             case .noSleepOnLidClose:
                 if hibernateMode == .deepHibernate {
                     let cmd = [
                         "pmset -a disablesleep 0",
                         "pmset -a standby 0",
                         "pmset -a hibernatemode 25",
-                        "pmset -a networkoversleep 1",
+                        "pmset -a networkoversleep 0",
                     ].joined(separator: "; ")
                     try await ShellHelper.runWithAdmin(cmd)
                 } else {
@@ -306,7 +378,14 @@ final class HibernateViewModel: ObservableObject {
                     ].joined(separator: "; ")
                     try await ShellHelper.runWithAdmin(cmd)
                 }
-                caffeinateProcess = try ShellHelper.launchCaffeinate()
+                // 根据电源键模式选择 caffeinate 变体：
+                // - 电源键=进入睡眠 → 不含 -s，保留电源键睡眠路径
+                // - 电源键=关闭屏幕 → 含 -s，全面阻止（电源键不触发睡眠，无需保留路径）
+                if powerButtonMode == .systemSleep {
+                    caffeinateProcess = try ShellHelper.launchCaffeinateLight()
+                } else {
+                    caffeinateProcess = try ShellHelper.launchCaffeinate()
+                }
             }
             lidStatus = .applied
             refreshPmsetInfo()
@@ -317,19 +396,34 @@ final class HibernateViewModel: ObservableObject {
 
     // MARK: - Apply Hibernate Mode
 
-    /// 应用休眠模式，同时联动合盖行为的 disablesleep 设置。
+    /// 应用休眠模式，同时联动唤醒源和合盖行为：
+    /// - 深度休眠 (mode 25): 关闭所有唤醒源（womp/powernap/tcpkeepalive），确保只有物理操作能唤醒
+    /// - 混合/睡眠: 只调整睡眠深度，不主动打开或关闭唤醒源
     func applyHibernateMode() async {
         hibernateModeStatus = .applying
         do {
             var cmds: [String]
             switch hibernateMode {
             case .memoryOnly:
-                cmds = ["pmset -a hibernatemode 0", "pmset -a standby 0"]
+                cmds = [
+                    "pmset -a hibernatemode 0",
+                    "pmset -a standby 0",
+                ]
             case .hybrid:
-                cmds = ["pmset -a hibernatemode 3", "pmset -a standby 1"]
+                cmds = [
+                    "pmset -a hibernatemode 3",
+                    "pmset -a standby 1",
+                ]
             case .deepHibernate:
-                cmds = ["pmset -a hibernatemode 25", "pmset -a standby 0"]
-                // deepHibernate 需要 disablesleep=0 才能让电源键生效
+                cmds = [
+                    "pmset -a hibernatemode 25",
+                    "pmset -a standby 0",
+                    // 关闭所有唤醒源 → 只有开盖/电源键能唤醒
+                    "pmset -a womp 0",
+                    "pmset -a powernap 0",
+                    "pmset -a tcpkeepalive 0",
+                    "pmset -a networkoversleep 0",
+                ]
                 if lidMode == .noSleepOnLidClose {
                     cmds.append("pmset -a disablesleep 0")
                 }
@@ -371,26 +465,30 @@ final class HibernateViewModel: ObservableObject {
     func hibernateNow() async {
         hibernateNowStatus = .applying
         do {
-            // Step 1: 按选中模式设置 hibernatemode（需要 admin）
+            // Step 1: 暂停本 App 自己创建的 caffeinate（不动第三方进程）
+            stopCaffeinate()
+
+            // Step 2: 刷新阻止源诊断；只提示，不自动暂停或杀掉第三方进程
+            refreshSleepBlockerDiagnostics()
+            try await Task.sleep(nanoseconds: 300_000_000)
+
+            // Step 3: 一次 admin 调用完成所有设置 + 触发睡眠
+            var cmds: [String] = []
             let hmVal = hibernateMode.rawValue
             let standbyVal = hibernateMode == .hybrid ? 1 : 0
-            try await ShellHelper.runWithAdmin(
-                "pmset -a hibernatemode \(hmVal); pmset -a standby \(standbyVal)"
-            )
-
-            // Step 2: 暂停 caffeinate（否则阻止睡眠）
-            if caffeinateRunning {
-                caffeinateProcess?.terminate()
-                caffeinateProcess = nil
-                _ = ShellHelper.run("pkill -f caffeinate 2>/dev/null")
-                caffeinateRunning = false
+            cmds.append("pmset -a hibernatemode \(hmVal)")
+            cmds.append("pmset -a standby \(standbyVal)")
+            if hibernateMode == .deepHibernate {
+                cmds.append("pmset -a womp 0")
+                cmds.append("pmset -a powernap 0")
+                cmds.append("pmset -a tcpkeepalive 0")
+                cmds.append("pmset -a networkoversleep 0")
             }
-
-            // Step 3: 触发睡眠（不需要 admin，直接在当前用户会话执行）
-            _ = ShellHelper.run("pmset sleepnow")
+            cmds.append("pmset -a disablesleep 0")
+            cmds.append("pmset sleepnow")
+            try await ShellHelper.runWithAdmin(cmds.joined(separator: "; "))
 
             hibernateNowStatus = .applied
-            // 刷新系统配置显示
             refreshPmsetInfo()
         } catch {
             hibernateNowStatus = .error(error.localizedDescription)
@@ -405,24 +503,104 @@ final class HibernateViewModel: ObservableObject {
     func sleepNow() async {
         sleepNowStatus = .applying
         do {
-            // Step 1: 解除 disablesleep（旧版本可能遗留 disablesleep=1，会彻底拦截 sleepnow）
-            try await ShellHelper.runWithAdmin("pmset -a disablesleep 0")
+            // Step 1: 停掉本 App 自己创建的 caffeinate（不动第三方进程）
+            stopCaffeinate()
 
-            // Step 2: 停掉 caffeinate（否则其睡眠阻止断言会拦截 sleepnow）
-            if caffeinateRunning {
-                caffeinateProcess?.terminate()
-                caffeinateProcess = nil
-                _ = ShellHelper.run("pkill -f caffeinate 2>/dev/null")
-                caffeinateRunning = false
-            }
+            // Step 2: 刷新阻止源诊断；只提示，不自动暂停或杀掉第三方进程
+            refreshSleepBlockerDiagnostics()
+            try await Task.sleep(nanoseconds: 300_000_000)
 
-            // Step 3: 触发睡眠
-            _ = ShellHelper.run("pmset sleepnow")
+            // Step 3: 一次 admin 调用：解除 disablesleep + 触发睡眠
+            try await ShellHelper.runWithAdmin("pmset -a disablesleep 0; pmset sleepnow")
             sleepNowStatus = .applied
             refreshPmsetInfo()
         } catch {
             sleepNowStatus = .error(error.localizedDescription)
         }
+    }
+
+    // MARK: - Sleep No Wake（睡眠+关闭唤醒源，安全放书包）
+
+    /// 进入混合睡眠（快速唤醒）但关闭所有唤醒源，确保不会被后台任务唤醒。
+    /// 适合放进书包的场景：不发热、微耗电、开盖即时恢复。
+    func sleepNoWake() async {
+        sleepNoWakeStatus = .applying
+        do {
+            // 停掉本 App 自己创建的 caffeinate；第三方阻止源只诊断不处理。
+            stopCaffeinate()
+            refreshSleepBlockerDiagnostics()
+            try await Task.sleep(nanoseconds: 300_000_000)
+
+            // 一次 admin：关闭唤醒源 + 保持 mode 3（快速恢复）+ 触发睡眠
+            let cmds = [
+                "pmset -a disablesleep 0",
+                "pmset -a hibernatemode 3",
+                "pmset -a womp 0",
+                "pmset -a powernap 0",
+                "pmset -a tcpkeepalive 0",
+                "pmset -a networkoversleep 0",
+                "pmset sleepnow",
+            ].joined(separator: "; ")
+            try await ShellHelper.runWithAdmin(cmds)
+
+            sleepNoWakeStatus = .applied
+            refreshPmsetInfo()
+        } catch {
+            sleepNoWakeStatus = .error(error.localizedDescription)
+        }
+    }
+
+    // MARK: - Sleep Blocker Diagnostics（睡眠阻止源诊断）
+
+    /// 只刷新睡眠阻止源诊断，不暂停或杀掉第三方进程。
+    /// 真实处理应交给用户：退出相关 App、停止播放音频、关闭外设唤醒等。
+    func checkSleepBlockers() {
+        refreshSleepBlockerDiagnostics()
+    }
+
+    func refreshSleepBlockerDiagnostics() {
+        sysAssertionBlockers = collectSleepAssertionBlockers()
+        refreshPmsetInfo()
+    }
+
+    private var isManagedCaffeinateRunning: Bool {
+        caffeinateProcess?.isRunning == true
+    }
+
+    private func collectSleepAssertionBlockers() -> [String] {
+        let output = ShellHelper.run("pmset -g assertions")
+        let ignored = Set(["powerd"])
+        let assertionKeys = [
+            "PreventUserIdleSystemSleep",
+            "NoIdleSleepAssertion",
+            "PreventSystemSleep",
+            "NoDisplaySleepAssertion",
+        ]
+        var blockers: [String] = []
+
+        for line in output.components(separatedBy: "\n") {
+            guard assertionKeys.contains(where: { line.contains($0) }) else { continue }
+            guard let pidRange = line.range(of: #"pid (\d+)\(([^)]+)\)"#, options: .regularExpression) else { continue }
+            let pidMatch = String(line[pidRange])
+            let parts = pidMatch.replacingOccurrences(of: "pid ", with: "").components(separatedBy: "(")
+            guard parts.count == 2 else { continue }
+            let procName = parts[1].replacingOccurrences(of: ")", with: "")
+            guard !ignored.contains(procName) else { continue }
+
+            let assertionName = assertionKeys.first(where: { line.contains($0) }) ?? "SleepAssertion"
+            let label: String
+            if let nameRange = line.range(of: #"named: "([^"]+)""#, options: .regularExpression) {
+                let named = String(line[nameRange])
+                    .replacingOccurrences(of: "named: ", with: "")
+                    .replacingOccurrences(of: "\"", with: "")
+                label = "\(procName) — \(named)"
+            } else {
+                label = "\(procName) — \(assertionName)"
+            }
+            blockers.append(label)
+        }
+
+        return Array(Set(blockers)).sorted()
     }
 
     // MARK: - Apply All
@@ -431,6 +609,8 @@ final class HibernateViewModel: ObservableObject {
         applyAllStatus = .applying
         await applySleepMode()
         if case .error = sleepStatus { applyAllStatus = .error("Auto sleep failed"); return }
+        await applyDisplayLock()
+        if case .error = displayLockStatus { applyAllStatus = .error("Display lock failed"); return }
         await applyDiskSleepMode()
         if case .error = diskSleepStatus { applyAllStatus = .error("Disk hibernate failed"); return }
         await applyHibernateMode()
@@ -442,11 +622,16 @@ final class HibernateViewModel: ObservableObject {
 
     // MARK: - Helpers（辅助方法）
 
-    /// 终止当前运行的 caffeinate 进程。
-    /// 同时通过 pkill 确保杀掉所有可能残留的 caffeinate 进程。
+    /// 终止当前 App 启动的 caffeinate 进程，不影响用户或其他 App 的 caffeinate。
     private func stopCaffeinate() {
-        caffeinateProcess?.terminate()
+        guard let process = caffeinateProcess else {
+            caffeinateRunning = false
+            return
+        }
+        if process.isRunning {
+            process.terminate()
+        }
         caffeinateProcess = nil
-        _ = ShellHelper.run("pkill -f 'caffeinate' 2>/dev/null")
+        caffeinateRunning = false
     }
 }

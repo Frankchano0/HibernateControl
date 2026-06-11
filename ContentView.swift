@@ -49,10 +49,10 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: AppTheme.sectionSpacing) {
                     sleepModeCard
-                    diskSleepCard
+                    displayLockCard
                     lidModeCard
-                    hibernateModeCard
                     powerButtonCard
+                    hibernateModeCard
                     pmsetInfoCard
                 }
                 .padding(.horizontal, 16)
@@ -103,12 +103,12 @@ struct ContentView: View {
         SettingCard(
             icon: "moon.zzz.fill",
             iconColor: AppTheme.sleep.icon,
-            title: lang.t("自动休眠", "Auto Sleep"),
+            title: lang.t("自动睡眠", "Auto Sleep"),
             status: viewModel.sleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.sleepMode, options: [
-                    (SleepMode.neverSleep, lang.t("永不休眠", "Never"), "infinity"),
+                    (SleepMode.neverSleep, lang.t("永不睡眠", "Never"), "infinity"),
                     (SleepMode.custom, lang.t("自定义", "Custom"), "slider.horizontal.3"),
                 ])
 
@@ -135,6 +135,36 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Display Lock Card（自动锁屏设置卡片）
+
+    private var displayLockCard: some View {
+        SettingCard(
+            icon: "lock.fill",
+            iconColor: .cyan,
+            title: lang.t("自动锁屏", "Auto Lock"),
+            status: viewModel.displayLockStatus
+        ) {
+            VStack(spacing: 10) {
+                modePicker(selection: $viewModel.displayLockMode, options: [
+                    (SleepMode.neverSleep, lang.t("永不锁屏", "Never"), "infinity"),
+                    (SleepMode.custom, lang.t("自定义", "Custom"), "slider.horizontal.3"),
+                ])
+
+                if viewModel.displayLockMode == .custom {
+                    minuteRow(
+                        icon: "clock",
+                        label: lang.t("闲置后锁屏", "Lock after idle"),
+                        value: $viewModel.displayLockMinutes,
+                        accent: .cyan
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        } applyAction: {
+            await viewModel.applyDisplayLock()
+        }
+    }
+
     // MARK: - Disk Sleep Card（磁盘睡眠设置卡片）
     // 控制硬盘空闲后自动休眠的时间。
     // - "Never Sleep"：磁盘永不休眠（pmset disksleep 0）
@@ -144,12 +174,12 @@ struct ContentView: View {
         SettingCard(
             icon: "internaldrive.fill",
             iconColor: AppTheme.disk.icon,
-            title: lang.t("磁盘休眠", "Disk Hibernate"),
+            title: lang.t("磁盘睡眠", "Disk Sleep"),
             status: viewModel.diskSleepStatus
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.diskSleepMode, options: [
-                    (DiskSleepMode.neverSleep, lang.t("永不休眠", "Never"), "infinity"),
+                    (DiskSleepMode.neverSleep, lang.t("永不睡眠", "Never"), "infinity"),
                     (DiskSleepMode.custom, lang.t("自定义", "Custom"), "slider.horizontal.3"),
                 ])
 
@@ -181,8 +211,8 @@ struct ContentView: View {
             status: viewModel.lidStatus
         ) {
             modePicker(selection: $viewModel.lidMode, options: [
-                (LidMode.sleepOnLidClose, lang.t("合盖休眠", "Sleep on Close"), "moon.fill"),
-                (LidMode.noSleepOnLidClose, lang.t("合盖不休眠", "Stay Awake"), "eye.fill"),
+                (LidMode.sleepOnLidClose, lang.t("合盖睡眠", "Sleep on Close"), "moon.fill"),
+                (LidMode.noSleepOnLidClose, lang.t("合盖不睡眠", "Stay Awake"), "eye.fill"),
             ])
         } applyAction: {
             await viewModel.applyLidMode()
@@ -194,7 +224,7 @@ struct ContentView: View {
 
     private var powerButtonModeSummary: String {
         switch viewModel.powerButtonMode {
-        case .displaySleep: return lang.t("关闭屏幕", "Display Off")
+        case .displaySleep: return lang.t("锁屏", "Lock Screen")
         case .systemSleep:  return lang.t("进入睡眠", "Sleep")
         }
     }
@@ -213,18 +243,10 @@ struct ContentView: View {
                 modePicker(
                     selection: $viewModel.powerButtonMode,
                     options: [
-                        (.displaySleep, lang.t("关闭屏幕", "Display Off"), "display.slash"),
-                        (.systemSleep,  lang.t("进入睡眠", "Sleep"),        "moon.fill"),
+                        (.displaySleep, lang.t("锁屏", "Lock Screen"), "lock.fill"),
+                        (.systemSleep,  lang.t("进入睡眠", "Sleep"),     "moon.fill"),
                     ]
                 )
-                let desc = viewModel.powerButtonMode == .displaySleep
-                    ? lang.t("短按电源键仅关闭屏幕，系统继续运行", "Short press turns off display only, system keeps running")
-                    : lang.t("短按电源键使系统进入睡眠", "Short press puts system to sleep")
-                Text(desc)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
             }
         } applyAction: {
             await viewModel.applyPowerButtonBehavior()
@@ -306,9 +328,9 @@ struct ContentView: View {
 
     private var hibernateModeSummary: String {
         switch viewModel.hibernateMode {
-        case .memoryOnly:    return lang.t("纯内存", "RAM Only")
+        case .memoryOnly:    return lang.t("睡眠",   "Sleep")
         case .hybrid:        return lang.t("混合",   "Hybrid")
-        case .deepHibernate: return lang.t("深度",   "Deep")
+        case .deepHibernate: return lang.t("休眠",   "Hibernate")
         }
     }
 
@@ -316,7 +338,7 @@ struct ContentView: View {
         SettingCard(
             icon: "sleep",
             iconColor: AppTheme.powerHibernate.icon,
-            title: lang.t("休眠模式", "Hibernate Mode"),
+            title: lang.t("睡眠深度", "Sleep Depth"),
             status: viewModel.hibernateModeStatus,
             isCollapsible: true,
             collapsedSummary: hibernateModeSummary,
@@ -324,9 +346,9 @@ struct ContentView: View {
         ) {
             VStack(spacing: 10) {
                 modePicker(selection: $viewModel.hibernateMode, options: [
-                    (.memoryOnly,    lang.t("纯内存", "RAM Only"),  "bolt.fill"),
-                    (.hybrid,        lang.t("混合",   "Hybrid"),    "square.stack.fill"),
-                    (.deepHibernate, lang.t("深度",   "Deep"),      "moon.zzz.fill"),
+                    (.memoryOnly,    lang.t("睡眠", "Sleep"),      "bolt.fill"),
+                    (.hybrid,        lang.t("混合", "Hybrid"),     "square.stack.fill"),
+                    (.deepHibernate, lang.t("休眠", "Hibernate"),  "moon.zzz.fill"),
                 ])
                 hibernateModeDetail(for: viewModel.hibernateMode)
             }
@@ -439,6 +461,9 @@ struct ContentView: View {
     private var systemConfigGrid: some View {
         VStack(spacing: 0) {
 
+            // ── 当前设置效果总结 ─────────────────────────────────────
+            configSummaryView
+
             // ── 合盖行为 ─────────────────────────────────────────
             configSectionHeader(lang.t("合盖行为", "Lid Behavior"))
             configRow(
@@ -454,21 +479,21 @@ struct ContentView: View {
                         ? "pmset -g | grep disablesleep  → 0"
                         : "pmset -g | grep disablesleep  → 1  /  pgrep caffeinate",
                     explain: viewModel.lidWillSleep
-                        ? lang.t("disablesleep=0，合盖后 macOS 正常触发休眠流程", "disablesleep=0: macOS sleeps normally on lid close")
-                        : lang.t("disablesleep=1 或 caffeinate 进程阻止了休眠，合盖后系统继续运行", "disablesleep=1 or caffeinate prevents sleep – system stays on")
+                        ? lang.t("disablesleep=0，合盖后 macOS 正常触发睡眠流程", "disablesleep=0: macOS sleeps normally on lid close")
+                        : lang.t("disablesleep=1 或 caffeinate 进程阻止了睡眠，合盖后系统继续运行", "disablesleep=1 or caffeinate prevents sleep – system stays on")
                 )
             )
             configRow(
                 icon: "wifi",
                 iconColor: .blue,
-                label: lang.t("休眠期间网络", "Network while asleep"),
+                label: lang.t("睡眠期间网络", "Network while asleep"),
                 value: viewModel.sysNetworkOverSleep == 1
                     ? lang.t("保持连接", "Stays connected")
                     : lang.t("断开连接", "Disconnected"),
                 valueColor: viewModel.sysNetworkOverSleep == 1 ? .green : .secondary,
                 detail: (
                     cmd: "pmset -g | grep networkoversleep  → \(viewModel.sysNetworkOverSleep < 0 ? "?" : "\(viewModel.sysNetworkOverSleep)")",
-                    explain: lang.t("1=休眠时维持网络唤醒（Power Nap），0=完全断网省电", "1=keep network for Power Nap; 0=disconnect to save power")
+                    explain: lang.t("1=睡眠时维持网络唤醒（Power Nap），0=完全断网省电", "1=keep network for Power Nap; 0=disconnect to save power")
                 )
             )
 
@@ -482,7 +507,7 @@ struct ContentView: View {
                 iconColor: AppTheme.powerButton.icon,
                 label: lang.t("短按电源键", "Short press"),
                 value: pbDisplaySleep
-                    ? lang.t("关闭屏幕", "Display off")
+                    ? lang.t("锁屏", "Lock screen")
                     : lang.t("系统睡眠", "System sleep"),
                 valueColor: pbDisplaySleep ? .cyan : .secondary,
                 detail: (
@@ -498,16 +523,16 @@ struct ContentView: View {
             configDivider()
 
             // ── 休眠模式 ─────────────────────────────────────────
-            configSectionHeader(lang.t("休眠模式", "Hibernate Mode"))
+            configSectionHeader(lang.t("睡眠深度", "Sleep Depth"))
             configRow(
                 icon: "sleep",
                 iconColor: AppTheme.powerHibernate.icon,
-                label: lang.t("当前休眠策略", "Active strategy"),
+                label: lang.t("当前睡眠深度", "Active depth"),
                 value: hibernateModeLabel(viewModel.sysHibernateMode),
                 valueColor: AppTheme.powerHibernate.accent,
                 detail: (
                     cmd: "pmset -g | grep hibernatemode  → \(viewModel.sysHibernateMode < 0 ? "?" : "\(viewModel.sysHibernateMode)")",
-                    explain: lang.t("0=纯内存（唤醒最快，断电丢失）  3=混合（默认，断电安全）  25=深度（RAM断电，零耗电）",
+                    explain: lang.t("0=睡眠（唤醒最快，断电丢失）  3=混合（默认，断电安全）  25=休眠（RAM断电，零耗电）",
                                     "0=RAM only (fastest)  3=Hybrid (default, safe)  25=Deep (RAM off, zero draw)")
                 )
             )
@@ -521,21 +546,21 @@ struct ContentView: View {
                 value: standbyEffective
                     ? lang.t("进入深度待机", "Deep standby")
                     : (viewModel.sysStandby == 1
-                        ? lang.t("不生效（自动休眠已关闭）", "N/A – auto-sleep is off")
+                        ? lang.t("不生效（自动睡眠已关闭）", "N/A – auto-sleep is off")
                         : lang.t("已禁用", "Disabled")),
                 valueColor: standbyEffective ? .green : .secondary,
                 detail: (
                     cmd: "pmset -g | grep standby  → \(viewModel.sysStandby < 0 ? "?" : "\(viewModel.sysStandby)")",
                     explain: standbyEffective
-                        ? lang.t("系统休眠后会进一步切断更多硬件供电，电池续航更长", "After sleeping, system cuts more power to extend battery life")
-                        : lang.t("需要先开启自动休眠（系统闲置超时 > 0），超长待机才能生效", "Requires auto-sleep timer > 0 to work – currently sleep is disabled")
+                        ? lang.t("系统睡眠后会进一步切断更多硬件供电，电池续航更长", "After sleeping, system cuts more power to extend battery life")
+                        : lang.t("需要先开启自动睡眠（系统闲置超时 > 0），超长待机才能生效", "Requires auto-sleep timer > 0 to work – currently sleep is disabled")
                 )
             )
 
             configDivider()
 
             // ── 自动休眠计时器 ────────────────────────────────────
-            configSectionHeader(lang.t("自动休眠计时器", "Auto-sleep Timers"))
+            configSectionHeader(lang.t("自动睡眠计时器", "Auto-sleep Timers"))
 
             // 系统休眠行 — 区分"配置为0"和"被进程阻止"
             let sleepBlocked = !viewModel.sysSleepBlockers.isEmpty
@@ -543,7 +568,7 @@ struct ContentView: View {
             configRow(
                 icon: "moon.zzz.fill",
                 iconColor: AppTheme.sleep.icon,
-                label: lang.t("系统闲置后休眠", "System sleeps after"),
+                label: lang.t("系统闲置后睡眠", "System sleeps after"),
                 value: sleepBlocked
                     ? lang.t("被 \(viewModel.sysSleepBlockers.joined(separator: "、")) 阻止",
                               "Blocked by \(viewModel.sysSleepBlockers.joined(separator: ", "))")
@@ -554,12 +579,34 @@ struct ContentView: View {
                 detail: (
                     cmd: "pmset -g | grep '^ sleep'  → \(sleepVal < 0 ? "?" : "\(sleepVal)")\(sleepBlocked ? " (prevented)" : "")",
                     explain: sleepBlocked
-                        ? lang.t("计时器本身可能有效，但当前有程序（如 caffeinate）持有『阻止睡眠断言』，系统不会自动进入休眠", "Timer may be set, but a process holds a sleep-prevention assertion (e.g. caffeinate)")
+                        ? lang.t("计时器本身可能有效，但当前有程序（如 caffeinate）持有『阻止睡眠断言』，系统不会自动进入睡眠", "Timer may be set, but a process holds a sleep-prevention assertion (e.g. caffeinate)")
                         : (sleepVal == 0
-                            ? lang.t("sleep=0 表示关闭了自动休眠计时器，系统永远不会因为闲置而自动休眠", "sleep=0: auto-sleep timer disabled; system never sleeps on its own")
-                            : lang.t("系统闲置 \(sleepVal) 分钟后自动进入休眠", "System auto-sleeps after \(sleepVal) min of inactivity"))
+                            ? lang.t("sleep=0 表示关闭了自动睡眠计时器，系统永远不会因为闲置而自动睡眠", "sleep=0: auto-sleep timer disabled; system never sleeps on its own")
+                            : lang.t("系统闲置 \(sleepVal) 分钟后自动进入睡眠", "System auto-sleeps after \(sleepVal) min of inactivity"))
                 )
             )
+
+            // 当前睡眠阻止源（来自 pmset -g assertions，仅诊断，不自动处理）
+            let assertionBlocked = !viewModel.sysAssertionBlockers.isEmpty
+            configRow(
+                icon: assertionBlocked ? "exclamationmark.triangle.fill" : "checkmark.shield.fill",
+                iconColor: assertionBlocked ? .orange : .green,
+                label: lang.t("当前阻止源", "Current blockers"),
+                value: assertionBlocked
+                    ? blockerSummary(viewModel.sysAssertionBlockers)
+                    : lang.t("未发现", "None detected"),
+                valueColor: assertionBlocked ? .orange : .green,
+                detail: (
+                    cmd: "pmset -g assertions",
+                    explain: assertionBlocked
+                        ? lang.t("当前阻止源：\(viewModel.sysAssertionBlockers.joined(separator: "；"))。HibernateControl 只提示，不会自动结束它们；建议先退出相关 App、停止音频播放或断开外设后再睡眠。", "Current blockers: \(viewModel.sysAssertionBlockers.joined(separator: "; ")). HibernateControl reports them only; quit the app, stop audio, or disconnect peripherals before sleeping.")
+                        : lang.t("当前没有明显的第三方睡眠阻止源。", "No obvious third-party sleep blocker is active.")
+                ),
+                actionIcon: "arrow.clockwise",
+                actionHelp: lang.t("重新检查睡眠阻止源", "Refresh sleep blockers")
+            ) {
+                viewModel.checkSleepBlockers()
+            }
 
             // 显示器关闭行
             let dispBlocked = !viewModel.sysDisplaySleepBlockers.isEmpty
@@ -590,7 +637,7 @@ struct ContentView: View {
             configRow(
                 icon: "internaldrive.fill",
                 iconColor: AppTheme.disk.icon,
-                label: lang.t("磁盘闲置后休眠", "Disk sleeps after"),
+                label: lang.t("磁盘闲置后睡眠", "Disk sleeps after"),
                 value: diskVal == 0
                     ? lang.t("已关闭", "Off")
                     : lang.t("\(diskVal) 分钟后", "After \(diskVal) min"),
@@ -598,7 +645,7 @@ struct ContentView: View {
                 detail: (
                     cmd: "pmset -g | grep disksleep  → \(diskVal < 0 ? "?" : "\(diskVal)")",
                     explain: diskVal == 0
-                        ? lang.t("disksleep=0，磁盘不会因闲置自动休眠，适合外接硬盘或频繁读写场景", "disksleep=0: disk never spins down; good for external drives or frequent I/O")
+                        ? lang.t("disksleep=0，磁盘不会因闲置自动睡眠，适合外接硬盘或频繁读写场景", "disksleep=0: disk never spins down; good for external drives or frequent I/O")
                         : lang.t("磁盘闲置 \(diskVal) 分钟后自动停转以节省电量", "Disk spins down after \(diskVal) min to save power")
                 )
             )
@@ -606,6 +653,71 @@ struct ContentView: View {
         .padding(.horizontal, 4)
         .background(AppTheme.cardBackground,
                     in: RoundedRectangle(cornerRadius: AppTheme.cardCornerRadius))
+    }
+
+    // ── 设置效果总结 ──────────────────────────────────────────
+
+    /// 根据当前系统状态生成一句话总结
+    private var configSummaryView: some View {
+        let summary = generateConfigSummary()
+        return Text(summary)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.blue.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 4)
+            .padding(.bottom, 6)
+    }
+
+    private func generateConfigSummary() -> String {
+        let lidSleeps = viewModel.lidWillSleep
+        let pbSleeps = viewModel.powerButtonMode == .systemSleep
+        let hm = viewModel.sysHibernateMode
+        let sleepTimer = viewModel.sysSystemSleep
+        let standby = viewModel.sysStandby == 1
+
+        let hmName: String = {
+            switch hm {
+            case 0: return lang.t("睡眠模式（RAM供电，快速唤醒）", "sleep mode (RAM on, fast wake)")
+            case 3: return lang.t("混合模式（快速唤醒+断电安全）", "hybrid mode (fast wake + power-loss safe)")
+            case 25: return lang.t("休眠模式（零耗电，唤醒较慢）", "hibernate mode (zero power, slow wake)")
+            default: return "mode \(hm)"
+            }
+        }()
+
+        var parts: [String] = []
+
+        // 合盖
+        if lidSleeps {
+            parts.append(lang.t("合盖后进入\(hmName)", "Lid close enters \(hmName)"))
+        } else {
+            parts.append(lang.t("合盖后保持运行", "Stays awake when lid closes"))
+        }
+
+        // 电源键
+        if pbSleeps {
+            parts.append(lang.t("电源键可触发睡眠", "power button triggers sleep"))
+        } else {
+            parts.append(lang.t("电源键仅锁屏", "power button only locks screen"))
+        }
+
+        // 闲置计时器
+        if sleepTimer > 0 {
+            if lidSleeps {
+                parts.append(lang.t("闲置\(sleepTimer)分钟自动睡眠", "auto-sleeps after \(sleepTimer) min idle"))
+            } else {
+                parts.append(lang.t("闲置计时器已设但被合盖不睡眠覆盖", "idle timer set but overridden by lid-awake mode"))
+            }
+        }
+
+        // 深度待机
+        if standby && lidSleeps && sleepTimer > 0 {
+            parts.append(lang.t("之后进入深度待机节电", "then enters deep standby"))
+        }
+
+        return parts.joined(separator: lang.t("；", "; ")) + "。"
     }
 
     // ── 辅助视图组件 ────────────────────────────────────────────
@@ -625,12 +737,18 @@ struct ContentView: View {
     private func configRow(
         icon: String, iconColor: Color,
         label: String, value: String, valueColor: Color,
-        detail: (cmd: String, explain: String)? = nil
+        detail: (cmd: String, explain: String)? = nil,
+        actionIcon: String? = nil,
+        actionHelp: String? = nil,
+        action: (() -> Void)? = nil
     ) -> some View {
         ConfigRowView(
             icon: icon, iconColor: iconColor,
             label: label, value: value, valueColor: valueColor,
-            detail: detail
+            detail: detail,
+            actionIcon: actionIcon,
+            actionHelp: actionHelp,
+            action: action
         )
     }
 
@@ -651,11 +769,20 @@ struct ContentView: View {
 
     private func hibernateModeLabel(_ val: Int) -> String {
         switch val {
-        case 0:  return lang.t("纯内存 (0)", "RAM only (0)")
+        case 0:  return lang.t("睡眠 (0)", "Sleep (0)")
         case 3:  return lang.t("混合 (3)", "Hybrid (3)")
-        case 25: return lang.t("深度 (25)", "Deep (25)")
+        case 25: return lang.t("休眠 (25)", "Hibernate (25)")
         default: return val >= 0 ? "\(val)" : "—"
         }
+    }
+
+    private func blockerSummary(_ blockers: [String]) -> String {
+        guard let first = blockers.first else { return lang.t("未发现", "None detected") }
+        let name = first.components(separatedBy: " — ").first ?? first
+        if blockers.count == 1 {
+            return name
+        }
+        return lang.t("\(name) 等 \(blockers.count) 项", "\(name) +\(blockers.count - 1)")
     }
 
     // MARK: - Apply All Bar（底部操作栏）
@@ -664,64 +791,84 @@ struct ContentView: View {
     private var applyAllBar: some View {
         VStack(spacing: 0) {
             Divider()
-            HStack(spacing: 12) {
-                // 立即休眠按钮（左侧）
-                Button(action: {
-                    Task { await viewModel.sleepNow() }
-                }) {
-                    HStack(spacing: 5) {
-                        if viewModel.sleepNowStatus.isApplying {
-                            ProgressView().controlSize(.small).scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "moon.zzz.fill")
-                                .font(.system(size: 13))
-                        }
-                        Text(lang.t("休眠", "Sleep"))
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.indigo)
-                .disabled(viewModel.sleepNowStatus.isApplying)
-
-                applyAllStatusView
-                Spacer()
-
-                // 全部应用
+            HStack(spacing: 10) {
+                // 全部应用（最左）
                 Button(action: {
                     Task { await viewModel.applyAll() }
                 }) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 5) {
                         if viewModel.applyAllStatus.isApplying {
                             ProgressView()
                                 .controlSize(.small)
                                 .scaleEffect(0.7)
                         } else {
                             Image(systemName: "bolt.circle.fill")
-                                .font(.system(size: 14))
+                                .font(.system(size: 13))
                         }
                         Text(lang.t("全部应用", "Apply All"))
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 14)
                     .padding(.vertical, 7)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.blue)
                 .disabled(viewModel.applyAllStatus.isApplying)
 
-                // 退出
+                applyAllStatusView
+                Spacer()
+
+                // 立即休眠（图标，退出左边）
+                Button(action: {
+                    Task { await viewModel.hibernateNow() }
+                }) {
+                    Group {
+                        if viewModel.hibernateNowStatus.isApplying {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "moon.zzz.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.indigo)
+                .help(lang.t("按当前睡眠深度立即睡眠", "Sleep using the selected depth"))
+                .disabled(viewModel.hibernateNowStatus.isApplying || viewModel.sleepNoWakeStatus.isApplying)
+
+                // 放入书包：混合睡眠 + 关闭唤醒源
+                Button(action: {
+                    Task { await viewModel.sleepNoWake() }
+                }) {
+                    Group {
+                        if viewModel.sleepNoWakeStatus.isApplying {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "bag.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .help(lang.t("进入睡眠并关闭网络/后台唤醒源，适合合盖放入书包", "Sleep and disable network/background wake sources before putting the Mac in a bag"))
+                .disabled(viewModel.hibernateNowStatus.isApplying || viewModel.sleepNoWakeStatus.isApplying)
+
+                // 退出（红色电源图标，最右）
                 Button(action: {
                     NSApplication.shared.terminate(nil)
                 }) {
-                    Text(lang.t("退出", "Quit"))
-                        .font(.system(size: 13))
-                        .padding(.horizontal, 12)
+                    Image(systemName: "power")
+                        .font(.system(size: 14, weight: .semibold))
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -857,6 +1004,9 @@ struct ConfigRowView: View {
     let value: String
     let valueColor: Color
     let detail: (cmd: String, explain: String)?
+    let actionIcon: String?
+    let actionHelp: String?
+    let action: (() -> Void)?
 
     @State private var expanded = false
 
@@ -875,6 +1025,20 @@ struct ConfigRowView: View {
                 Text(value)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(valueColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 180, alignment: .trailing)
+                if let actionIcon, let action {
+                    Button(action: action) {
+                        Image(systemName: actionIcon)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(actionHelp ?? "")
+                }
                 // 展开箭头（仅当有 detail 时显示）
                 if detail != nil {
                     Image(systemName: "chevron.right")
