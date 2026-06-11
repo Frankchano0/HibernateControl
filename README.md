@@ -121,7 +121,13 @@ open HibernateControl.app
 
 **「无法打开，因为无法验证开发者」**
 
-右键点击 app → 选择「打开」→ 弹窗中点击「打开」
+第一次打开时，不要直接双击。右键点击 app → 选择「打开」→ 弹窗中点击「打开」。
+只需操作一次，以后就能直接打开。
+
+或者，用终端命令移除隔离标记后就能直接打开：
+```bash
+sudo xattr -cr /Applications/HibernateControl.app
+```
 
 **「已损坏，无法打开」**
 
@@ -244,7 +250,13 @@ open HibernateControl.app
 
 **"Cannot be opened because the developer cannot be verified"**
 
-Right-click the app → Open → click **Open** in the dialog.
+The first time you open the app, don't double-click. Right-click → Open → click **Open**.
+You only need to do this once; after that it opens normally.
+
+Or, remove quarantine from the terminal to skip this:
+```bash
+sudo xattr -cr /Applications/HibernateControl.app
+```
 
 **"The app is damaged and can't be opened"**
 
