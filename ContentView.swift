@@ -59,11 +59,11 @@ struct ContentView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
 
             applyAllBar         // 底部"全部应用"操作栏
         }
-        .frame(maxWidth: .infinity)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 400, height: 720, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
